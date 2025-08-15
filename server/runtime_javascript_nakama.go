@@ -8662,8 +8662,12 @@ func (n *RuntimeJavascriptNakamaModule) localcachePut(r *goja.Runtime) func(goja
 func (n *RuntimeJavascriptNakamaModule) localcacheDelete(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
 	return func(f goja.FunctionCall) goja.Value {
 		key := getJsString(r, f.Argument(0))
+		op := getJsCacheOption(r, f.Argument(1))
+		direction := ParseCacheDirection(op.direction)
 		if key == "" {
-			panic(r.NewTypeError("expects non empty key string"))
+			if direction == CacheDirectionLocalOnly || op.tags == nil {
+				panic(r.NewTypeError("expects non empty key string for local only or empty tags"))
+			}
 		}
 
 		var (
@@ -8674,8 +8678,6 @@ func (n *RuntimeJavascriptNakamaModule) localcacheDelete(r *goja.Runtime) func(g
 			cacher = peer.GetCacher()
 		}
 
-		op := getJsCacheOption(r, f.Argument(1))
-		direction := ParseCacheDirection(op.direction)
 		if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
 			n.localCache.Delete(key)
 			return goja.Undefined()
@@ -8687,9 +8689,10 @@ func (n *RuntimeJavascriptNakamaModule) localcacheDelete(r *goja.Runtime) func(g
 			}
 			return goja.Undefined()
 		}
-
-		if err := cacher.Delete(key); err != nil {
-			panic(r.NewTypeError(err.Error()))
+		if key != "" {
+			if err := cacher.Delete(key); err != nil {
+				panic(r.NewTypeError(err.Error()))
+			}
 		}
 		return goja.Undefined()
 	}
