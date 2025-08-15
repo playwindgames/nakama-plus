@@ -52,6 +52,22 @@ func NewEtcd(client *clientv3.Client, prefix string, options ...lib_store.Option
 }
 
 // Get returns data stored from a given key
+// Get 从etcd存储中获取指定key的值
+//
+// 参数:
+//
+//	ctx - 上下文信息，用于控制请求的超时和取消
+//	key - 要获取的键，类型为interface{}，实际使用时会被断言为string
+//
+// 返回值:
+//
+//	any - 返回找到的值，类型为interface{}，实际为string类型
+//	error - 如果发生错误或key不存在，返回相应的错误信息
+//
+// 注意:
+//   - 使用s.keys()方法处理输入的key
+//   - 如果key不存在，返回lib_store.NotFoundWithCause包装的错误
+//   - 返回的值是从etcd的Key-Value对中提取的Value字段，转换为string类型
 func (s *EtcdStore) Get(ctx context.Context, key any) (any, error) {
 	resp, err := s.client.Get(ctx, s.keys(key.(string)))
 	if err != nil {
@@ -238,6 +254,20 @@ func (s *EtcdStore) GetType() string {
 	return EtcdType
 }
 
+// keys 生成并返回一个格式化的键路径字符串
+// 该方法将前缀、EtcdPrefix和"values"与提供的键参数组合成一个以斜杠分隔的路径
+//
+// 参数:
+//
+//	key ...string: 可变数量的键字符串，将被添加到生成的路径中
+//
+// 返回值:
+//
+//	string: 格式化后的键路径字符串，以斜杠(/)开头
+//
+// 示例:
+//
+//	s.keys("key1", "key2") 将返回 "/prefix/etcd/values/key1/key2"
 func (s *EtcdStore) keys(key ...string) string {
 	newKeys := make([]string, 0, len(key)+1)
 	newKeys = append(newKeys, strings.Trim(s.prefix, "/"), EtcdPrefix, "values")
@@ -247,6 +277,22 @@ func (s *EtcdStore) keys(key ...string) string {
 	return "/" + strings.Join(newKeys, "/")
 }
 
+// tagKeys 生成用于存储标签的etcd键路径
+// 该方法会自动处理前缀和路径分隔符，确保生成的键路径格式规范
+//
+// 参数:
+//
+//	key - 可变参数，表示要追加到键路径中的部分
+//
+// 返回值:
+//
+//	string - 格式化后的完整etcd键路径，以"/"开头
+//
+// 示例:
+//
+//	s.prefix = "/app"
+//	key = "service1", "version1"
+//	返回: "/app/etcd/tags/service1/version1"
 func (s *EtcdStore) tagKeys(key ...string) string {
 	newKeys := make([]string, 0, len(key)+1)
 	newKeys = append(newKeys, strings.Trim(s.prefix, "/"), EtcdPrefix, "tags")
