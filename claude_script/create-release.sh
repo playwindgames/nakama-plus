@@ -204,14 +204,15 @@ create_github_release() {
     local temp_file=$(mktemp)
     echo -e "$content" > "$temp_file"
 
-    # 构建 gh release 命令
-    local cmd="gh release create $version --title \"$title\" --notes-file \"$temp_file\" $repo_flag"
+    # 构建 gh release 命令，版本号前加 v 前缀
+    local release_tag="v$version"
+    local cmd="gh release create $release_tag --title \"$title\" --notes-file \"$temp_file\" $repo_flag"
 
     if [[ "$DRY_RUN" == true ]]; then
         echo -e "\n${YELLOW}=== Dry Run 模式 ===${NC}"
         echo -e "${BLUE}将执行以下操作：\n${NC}"
         echo -e "${YELLOW}📦 Release 信息：${NC}"
-        echo "  版本号: $version"
+        echo "  版本号: $release_tag"
         echo "  标题: $title"
         [[ -n "$repo" ]] && echo "  仓库: $repo"
         echo -e "\n${YELLOW}📝 Release 内容：${NC}"
@@ -228,13 +229,13 @@ create_github_release() {
             # 获取 release URL
             local release_url
             if [[ -n "$repo" ]]; then
-                release_url="https://github.com/$repo/releases/tag/$version"
+                release_url="https://github.com/$repo/releases/tag/$release_tag"
             else
                 local remote_url=$(git remote get-url $(git remote | head -n 1) 2>/dev/null || echo "")
                 if [[ "$remote_url" =~ github\.com[:/](.+)\.git$ ]]; then
-                    release_url="https://github.com/${BASH_REMATCH[1]}/releases/tag/$version"
+                    release_url="https://github.com/${BASH_REMATCH[1]}/releases/tag/$release_tag"
                 else
-                    release_url="Release created for version $version"
+                    release_url="Release created for version $release_tag"
                 fi
             fi
 
@@ -317,7 +318,7 @@ main() {
 
     # 设置标题
     if [[ -z "$TITLE" ]]; then
-        TITLE="Release $current_version"
+        TITLE="v$current_version"
     fi
 
     # 生成 release 内容

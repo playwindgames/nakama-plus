@@ -30,7 +30,7 @@
 ./create-release.sh --prev-version 3.31.0
 
 # 自定义标题和仓库
-./create-release.sh --title "Nakama v3.32.1" --repo heroiclabs/nakama
+./create-release.sh --title "Custom Release Title" --repo heroiclabs/nakama
 ```
 
 ## 参数说明
@@ -59,8 +59,8 @@
 将执行以下操作：
 
 📦 Release 信息：
-  版本号: 3.32.1
-  标题: Release 3.32.1
+  版本号: v3.32.1
+  标题: v3.32.1
   仓库: heroiclabs/nakama
 
 📝 Release 内容：
