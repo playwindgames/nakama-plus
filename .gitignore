@@ -719,3 +719,6 @@ MigrationBackup/
 
 config.yml
 !vendor/**/coverage.go
+
+# claude code
+.spec-workflow
