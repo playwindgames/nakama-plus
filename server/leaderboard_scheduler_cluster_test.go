@@ -11,6 +11,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
@@ -1098,4 +1100,56 @@ func TestLeaderboardSchedulerInstallCanRun(t *testing.T) {
 	require.NotNil(t, ls.fnCanRun, "installCanRun 应装配 fnCanRun")
 	require.True(t, ls.fnCanRun("anything"),
 		"未接入 peer 时应退化为「总是可运行」（单节点行为）")
+}
+
+// failingConnector 让 sql.DB 的每次取连接都失败，用来在不接真库的情况下走到
+// invokeCallback 的 DB 分支。比 ls.db = nil 好：后者会 panic，红得不清不楚。
+type failingConnector struct{}
+
+func (failingConnector) Connect(context.Context) (driver.Conn, error) {
+	return nil, errors.New("no database in this test")
+}
+func (failingConnector) Driver() driver.Driver { return nil }
+
+// 补 Task 7 的覆盖缺口：突变验证发现移除 tournament end 路径的 fnCanRun 判定后
+// 所有测试仍然绿 —— 说明那处插入点没有任何测试覆盖。
+//
+// 该路径的入口是 callback.leaderboard == nil（榜已从 cache 里消失、只剩 id），
+// 判定通过后会立刻查库。所以「判定生效」的可观测证据就是**根本没查库**。
+func TestLeaderboardSchedulerInvokeCallbackRespectsCanRunTournamentEnd(t *testing.T) {
+	core, logs := observer.New(zapcore.WarnLevel)
+	logger := zap.New(core)
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+
+	ls := newTestScheduler(logger, cache)
+	ls.ctx, ls.ctxCancelFn = context.WithCancel(context.Background())
+	ls.db = sql.OpenDB(failingConnector{})
+	ls.fnCanRun = func(string) bool { return false } // 本节点不负责
+	defer func() { ls.ctxCancelFn(); stopTestScheduler(ls) }()
+
+	invoked := make(chan struct{}, 1)
+	ls.fnTournamentEnd = func(context.Context, *api.Tournament, int64, int64) error {
+		invoked <- struct{}{}
+		return nil
+	}
+
+	go ls.invokeCallback()
+	// leaderboard 为 nil ⇒ 走 tournament end 分支
+	ls.queue <- &LeaderboardSchedulerCallback{
+		id: "gone", leaderboard: nil, ts: now, t: time.Unix(now-1, 0).UTC(),
+	}
+
+	select {
+	case <-invoked:
+		t.Fatal("fnCanRun 返回 false 时 tournament end 回调不得执行")
+	case <-time.After(400 * time.Millisecond):
+	}
+
+	// 判定若没生效，会走到查库那一步并记下 Error 日志。
+	for _, e := range logs.All() {
+		if e.Message == "Error retrieving tournament to invoke end callback" {
+			t.Fatal("fnCanRun 返回 false 时不该查库 —— 说明 tournament end 路径缺少归属判定")
+		}
+	}
 }

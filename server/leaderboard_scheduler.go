@@ -396,6 +396,12 @@ func (ls *LocalLeaderboardScheduler) invokeCallback() {
 			return
 		case callback := <-ls.queue:
 			if callback.leaderboard != nil {
+				// 集群归属判定：不判定的话，集群里每个节点都会把到期的榜放进 queue，
+				// 周榜结算会被执行 N 次。
+				if ok := ls.fnCanRun(callback.leaderboard.Id); !ok {
+					continue
+				}
+
 				if callback.leaderboard.IsTournament() {
 					// Tournament, fetch most up-to-date info for size etc.
 					// Some processing is needed even if there is no runtime callback registered for tournament reset.
@@ -439,6 +445,11 @@ WHERE id = $1`
 					}
 				}
 			} else {
+				// 同上：tournament end 路径也必须判定归属。
+				if ok := ls.fnCanRun(callback.id); !ok {
+					continue
+				}
+
 				query := `SELECT
 id, sort_order, operator, reset_schedule, metadata, create_time,
 category, description, duration, end_time, max_size, max_num_score, title, size, start_time
