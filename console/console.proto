@@ -1144,7 +1144,7 @@ message Extensions {
    // The UNIX time when the tournament is next playable. A computed value.
    uint32 next_reset = 22;
    // running on node
-   string node = 23;
+   string node = 901;
  }
 
  // List leaderboards.
@@ -1444,6 +1444,11 @@ message User {
  }
 
  // List of nodes and their stats.
+// ⚠️ fork 专用字段一律使用 900+ 号段（leader=900 / Leaderboard.node=901 /
+//    StatusList.services=902）。不要改成「官方最大号 +1」—— 上游下一次新增就会撞上，
+//    这棵树要长期演进，每次升级都会重演同一次撞车。
+//    避开 19000~19999（protobuf 实现保留区间）。
+//    见 docs/superpowers/specs/2026-08-27-nakama-340-port-a-design.md 的 D12。
  message StatusList {
    // The status of a Nakama node.
    message Status {
@@ -1468,11 +1473,11 @@ message User {
      // Average output bandwidth usage.
      double avg_output_kbs = 10;
      // Leader
-     bool leader = 11;
+     bool leader = 900;
      // Current number of active parties.
-    int32 party_count = 12;
+    int32 party_count = 11;
     // Time when the node was created and started up.
-    google.protobuf.Timestamp create_time = 13;
+    google.protobuf.Timestamp create_time = 12;
    }
 
   message ServiceStatus {
@@ -1494,7 +1499,7 @@ message User {
    // Timestamp
    google.protobuf.Timestamp timestamp = 2;
 
-   repeated ServiceStatus services = 3;
+   repeated ServiceStatus services = 902;
  }
 
  // Runtime information

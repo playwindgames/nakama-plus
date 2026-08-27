@@ -3595,7 +3595,7 @@ type Leaderboard struct {
 	// The UNIX time when the tournament is next playable. A computed value.
 	NextReset uint32 `protobuf:"varint,22,opt,name=next_reset,json=nextReset,proto3" json:"next_reset,omitempty"`
 	// running on node
-	Node          string `protobuf:"bytes,23,opt,name=node,proto3" json:"node,omitempty"`
+	Node          string `protobuf:"bytes,901,opt,name=node,proto3" json:"node,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5539,13 +5539,19 @@ func (x *UserList) GetUsers() []*User {
 }
 
 // List of nodes and their stats.
+// ⚠️ fork 专用字段一律使用 900+ 号段（leader=900 / Leaderboard.node=901 /
+//
+//	StatusList.services=902）。不要改成「官方最大号 +1」—— 上游下一次新增就会撞上，
+//	这棵树要长期演进，每次升级都会重演同一次撞车。
+//	避开 19000~19999（protobuf 实现保留区间）。
+//	见 docs/superpowers/specs/2026-08-27-nakama-340-port-a-design.md 的 D12。
 type StatusList struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// List of nodes and their stats.
 	Nodes []*StatusList_Status `protobuf:"bytes,1,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	// Timestamp
 	Timestamp     *timestamppb.Timestamp      `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
-	Services      []*StatusList_ServiceStatus `protobuf:"bytes,3,rep,name=services,proto3" json:"services,omitempty"`
+	Services      []*StatusList_ServiceStatus `protobuf:"bytes,902,rep,name=services,proto3" json:"services,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7918,11 +7924,11 @@ type StatusList_Status struct {
 	// Average output bandwidth usage.
 	AvgOutputKbs float64 `protobuf:"fixed64,10,opt,name=avg_output_kbs,json=avgOutputKbs,proto3" json:"avg_output_kbs,omitempty"`
 	// Leader
-	Leader bool `protobuf:"varint,11,opt,name=leader,proto3" json:"leader,omitempty"`
+	Leader bool `protobuf:"varint,900,opt,name=leader,proto3" json:"leader,omitempty"`
 	// Current number of active parties.
-	PartyCount int32 `protobuf:"varint,12,opt,name=party_count,json=partyCount,proto3" json:"party_count,omitempty"`
+	PartyCount int32 `protobuf:"varint,11,opt,name=party_count,json=partyCount,proto3" json:"party_count,omitempty"`
 	// Time when the node was created and started up.
-	CreateTime    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	CreateTime    *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9823,7 +9829,7 @@ const file_console_proto_rawDesc = "" +
 	"\x10inventory_system\x18\x02 \x01(\bR\x0finventorySystem\x12-\n" +
 	"\x12progression_system\x18\x03 \x01(\bR\x11progressionSystem\x12!\n" +
 	"\fstats_system\x18\x04 \x01(\bR\vstatsSystem\x12#\n" +
-	"\renergy_system\x18\x05 \x01(\bR\fenergySystem\"\x8c\x06\n" +
+	"\renergy_system\x18\x05 \x01(\bR\fenergySystem\"\x8d\x06\n" +
 	"\vLeaderboard\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
@@ -9855,8 +9861,8 @@ const file_console_proto_rawDesc = "" +
 	"\n" +
 	"prev_reset\x18\x15 \x01(\rR\tprevReset\x12\x1d\n" +
 	"\n" +
-	"next_reset\x18\x16 \x01(\rR\tnextReset\x12\x12\n" +
-	"\x04node\x18\x17 \x01(\tR\x04node\"0\n" +
+	"next_reset\x18\x16 \x01(\rR\tnextReset\x12\x13\n" +
+	"\x04node\x18\x85\a \x01(\tR\x04node\"0\n" +
 	"\x16LeaderboardListRequest\x12\x16\n" +
 	"\x06cursor\x18\x01 \x01(\tR\x06cursor\"\x80\x01\n" +
 	"\x0fLeaderboardList\x12?\n" +
@@ -10007,12 +10013,12 @@ const file_console_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x121\n" +
 	"\x05value\x18\x02 \x01(\v2\x1b.nakama.console.PermissionsR\x05value:\x028\x01\"6\n" +
 	"\bUserList\x12*\n" +
-	"\x05users\x18\x01 \x03(\v2\x14.nakama.console.UserR\x05users\"\x86\b\n" +
+	"\x05users\x18\x01 \x03(\v2\x14.nakama.console.UserR\x05users\"\x88\b\n" +
 	"\n" +
 	"StatusList\x127\n" +
 	"\x05nodes\x18\x01 \x03(\v2!.nakama.console.StatusList.StatusR\x05nodes\x128\n" +
-	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12D\n" +
-	"\bservices\x18\x03 \x03(\v2(.nakama.console.StatusList.ServiceStatusR\bservices\x1a\xf0\x03\n" +
+	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x12E\n" +
+	"\bservices\x18\x86\a \x03(\v2(.nakama.console.StatusList.ServiceStatusR\bservices\x1a\xf1\x03\n" +
 	"\x06Status\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x124\n" +
 	"\x06health\x18\x02 \x01(\x0e2\x1c.nakama.console.StatusHealthR\x06health\x12#\n" +
@@ -10026,11 +10032,11 @@ const file_console_proto_rawDesc = "" +
 	"avgRateSec\x12\"\n" +
 	"\ravg_input_kbs\x18\t \x01(\x01R\vavgInputKbs\x12$\n" +
 	"\x0eavg_output_kbs\x18\n" +
-	" \x01(\x01R\favgOutputKbs\x12\x16\n" +
-	"\x06leader\x18\v \x01(\bR\x06leader\x12\x1f\n" +
-	"\vparty_count\x18\f \x01(\x05R\n" +
+	" \x01(\x01R\favgOutputKbs\x12\x17\n" +
+	"\x06leader\x18\x84\a \x01(\bR\x06leader\x12\x1f\n" +
+	"\vparty_count\x18\v \x01(\x05R\n" +
 	"partyCount\x12;\n" +
-	"\vcreate_time\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\vcreate_time\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"createTime\x1a\xcb\x02\n" +
 	"\rServiceStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12F\n" +
