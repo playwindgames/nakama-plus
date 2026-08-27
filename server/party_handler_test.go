@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/rtapi"
 	"go.uber.org/zap"
 )
 

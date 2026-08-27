@@ -14,7 +14,7 @@
 
 package server
 
-import "github.com/heroiclabs/nakama-common/runtime"
+import "github.com/doublemo/nakama-common/runtime"
 
 type RuntimeConfigClone struct {
 	Name          string

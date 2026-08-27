@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/server"
+	"github.com/doublemo/nakama-plus/v3/server"
 	sqlmigrate "github.com/heroiclabs/sql-migrate"
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"

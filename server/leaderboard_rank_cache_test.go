@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
+	"github.com/doublemo/nakama-common/api"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -18,7 +18,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/heroiclabs/nakama/v3/console"
+	"github.com/doublemo/nakama-plus/v3/console"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

@@ -20,7 +20,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/heroiclabs/nakama/v3/console"
+	"github.com/doublemo/nakama-plus/v3/console"
 )
 
 // ATTENTION: These values cannot be changed as they represent the bit positions in the ACL bitmap.

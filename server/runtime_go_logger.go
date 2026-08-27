@@ -19,7 +19,7 @@ import (
 	"runtime"
 	"strings"
 
-	nkruntime "github.com/heroiclabs/nakama-common/runtime"
+	nkruntime "github.com/doublemo/nakama-common/runtime"
 	"go.uber.org/zap"
 )
 

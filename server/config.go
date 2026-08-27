@@ -24,8 +24,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/flags"
+	"github.com/doublemo/nakama-common/runtime"
+	"github.com/doublemo/nakama-plus/v3/flags"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"

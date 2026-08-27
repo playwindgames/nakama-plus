@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/doublemo/nakama-common/runtime"
 
 	"github.com/dop251/goja"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/rtapi"
-	"github.com/heroiclabs/nakama/v3/social"
+	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/doublemo/nakama-plus/v3/social"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"

@@ -29,11 +29,11 @@ import (
 	"time"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama/v3/console"
-	"github.com/heroiclabs/nakama/v3/migrate"
-	"github.com/heroiclabs/nakama/v3/se"
-	"github.com/heroiclabs/nakama/v3/server"
-	"github.com/heroiclabs/nakama/v3/social"
+	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/doublemo/nakama-plus/v3/migrate"
+	"github.com/doublemo/nakama-plus/v3/se"
+	"github.com/doublemo/nakama-plus/v3/server"
+	"github.com/doublemo/nakama-plus/v3/social"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/jackc/pgx/v5/stdlib" // Blank import to register SQL driver
 	"go.uber.org/zap"

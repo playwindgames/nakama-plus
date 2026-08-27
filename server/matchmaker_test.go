@@ -24,9 +24,9 @@ import (
 
 	"github.com/blugelabs/bluge"
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
-	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/doublemo/nakama-common/api"
+	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/runtime"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"

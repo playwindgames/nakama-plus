@@ -24,7 +24,7 @@
 package rtapi
 
 import (
-	api "github.com/heroiclabs/nakama-common/api"
+	api "github.com/doublemo/nakama-common/api"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -226,6 +226,8 @@ type Envelope struct {
 	//	*Envelope_PartyData
 	//	*Envelope_PartyDataSend
 	//	*Envelope_PartyPresenceEvent
+	//	*Envelope_AnyRequest
+	//	*Envelope_AnyResponseWriter
 	//	*Envelope_PartyUpdate
 	Message       isEnvelope_Message `protobuf_oneof:"message"`
 	unknownFields protoimpl.UnknownFields
@@ -717,6 +719,24 @@ func (x *Envelope) GetPartyPresenceEvent() *PartyPresenceEvent {
 	return nil
 }
 
+func (x *Envelope) GetAnyRequest() *api.AnyRequest {
+	if x != nil {
+		if x, ok := x.Message.(*Envelope_AnyRequest); ok {
+			return x.AnyRequest
+		}
+	}
+	return nil
+}
+
+func (x *Envelope) GetAnyResponseWriter() *api.AnyResponseWriter {
+	if x != nil {
+		if x, ok := x.Message.(*Envelope_AnyResponseWriter); ok {
+			return x.AnyResponseWriter
+		}
+	}
+	return nil
+}
+
 func (x *Envelope) GetPartyUpdate() *PartyUpdate {
 	if x != nil {
 		if x, ok := x.Message.(*Envelope_PartyUpdate); ok {
@@ -975,9 +995,19 @@ type Envelope_PartyPresenceEvent struct {
 	PartyPresenceEvent *PartyPresenceEvent `protobuf:"bytes,50,opt,name=party_presence_event,json=partyPresenceEvent,proto3,oneof"`
 }
 
+type Envelope_AnyRequest struct {
+	// Any request
+	AnyRequest *api.AnyRequest `protobuf:"bytes,51,opt,name=any_request,json=anyRequest,proto3,oneof"`
+}
+
+type Envelope_AnyResponseWriter struct {
+	// Any response
+	AnyResponseWriter *api.AnyResponseWriter `protobuf:"bytes,52,opt,name=any_response_writer,json=anyResponseWriter,proto3,oneof"`
+}
+
 type Envelope_PartyUpdate struct {
 	// Update Party label and whether it's open or closed.
-	PartyUpdate *PartyUpdate `protobuf:"bytes,51,opt,name=party_update,json=partyUpdate,proto3,oneof"`
+	PartyUpdate *PartyUpdate `protobuf:"bytes,53,opt,name=party_update,json=partyUpdate,proto3,oneof"`
 }
 
 func (*Envelope_Channel) isEnvelope_Message() {}
@@ -1077,6 +1107,10 @@ func (*Envelope_PartyData) isEnvelope_Message() {}
 func (*Envelope_PartyDataSend) isEnvelope_Message() {}
 
 func (*Envelope_PartyPresenceEvent) isEnvelope_Message() {}
+
+func (*Envelope_AnyRequest) isEnvelope_Message() {}
+
+func (*Envelope_AnyResponseWriter) isEnvelope_Message() {}
 
 func (*Envelope_PartyUpdate) isEnvelope_Message() {}
 
@@ -4436,7 +4470,7 @@ var File_realtime_proto protoreflect.FileDescriptor
 
 const file_realtime_proto_rawDesc = "" +
 	"\n" +
-	"\x0erealtime.proto\x12\x0fnakama.realtime\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\rapi/api.proto\"\xb7\x1c\n" +
+	"\x0erealtime.proto\x12\x0fnakama.realtime\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1egoogle/protobuf/wrappers.proto\x1a\rapi/api.proto\x1a\x11api/api_any.proto\"\xc3\x1d\n" +
 	"\bEnvelope\x12\x10\n" +
 	"\x03cid\x18\x01 \x01(\tR\x03cid\x124\n" +
 	"\achannel\x18\x02 \x01(\v2\x18.nakama.realtime.ChannelH\x00R\achannel\x12A\n" +
@@ -4496,8 +4530,11 @@ const file_realtime_proto_rawDesc = "" +
 	"\n" +
 	"party_data\x180 \x01(\v2\x1a.nakama.realtime.PartyDataH\x00R\tpartyData\x12H\n" +
 	"\x0fparty_data_send\x181 \x01(\v2\x1e.nakama.realtime.PartyDataSendH\x00R\rpartyDataSend\x12W\n" +
-	"\x14party_presence_event\x182 \x01(\v2#.nakama.realtime.PartyPresenceEventH\x00R\x12partyPresenceEvent\x12A\n" +
-	"\fparty_update\x183 \x01(\v2\x1c.nakama.realtime.PartyUpdateH\x00R\vpartyUpdateB\t\n" +
+	"\x14party_presence_event\x182 \x01(\v2#.nakama.realtime.PartyPresenceEventH\x00R\x12partyPresenceEvent\x129\n" +
+	"\vany_request\x183 \x01(\v2\x16.nakama.api.AnyRequestH\x00R\n" +
+	"anyRequest\x12O\n" +
+	"\x13any_response_writer\x184 \x01(\v2\x1d.nakama.api.AnyResponseWriterH\x00R\x11anyResponseWriter\x12A\n" +
+	"\fparty_update\x185 \x01(\v2\x1c.nakama.realtime.PartyUpdateH\x00R\vpartyUpdateB\t\n" +
 	"\amessage\"\x81\x02\n" +
 	"\aChannel\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
@@ -4766,8 +4803,8 @@ const file_realtime_proto_rawDesc = "" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x1a\n" +
 	"\busername\x18\x03 \x01(\tR\busername\x12 \n" +
 	"\vpersistence\x18\x04 \x01(\bR\vpersistence\x124\n" +
-	"\x06status\x18\x05 \x01(\v2\x1c.google.protobuf.StringValueR\x06statusBl\n" +
-	"\x1bcom.heroiclabs.nakama.rtapiB\x0eNakamaRealtimeP\x01Z)github.com/heroiclabs/nakama-common/rtapi\xaa\x02\x0fNakama.Protobufb\x06proto3"
+	"\x06status\x18\x05 \x01(\v2\x1c.google.protobuf.StringValueR\x06statusBj\n" +
+	"\x1bcom.heroiclabs.nakama.rtapiB\x0eNakamaRealtimeP\x01Z'github.com/doublemo/nakama-common/rtapi\xaa\x02\x0fNakama.Protobufb\x06proto3"
 
 var (
 	file_realtime_proto_rawDescOnce sync.Once
@@ -4848,11 +4885,13 @@ var file_realtime_proto_goTypes = []any{
 	nil,                                      // 61: nakama.realtime.PartyMatchmakerAdd.NumericPropertiesEntry
 	(*api.ChannelMessage)(nil),               // 62: nakama.api.ChannelMessage
 	(*api.Rpc)(nil),                          // 63: nakama.api.Rpc
-	(*wrapperspb.BoolValue)(nil),             // 64: google.protobuf.BoolValue
-	(*wrapperspb.Int32Value)(nil),            // 65: google.protobuf.Int32Value
-	(*timestamppb.Timestamp)(nil),            // 66: google.protobuf.Timestamp
-	(*wrapperspb.StringValue)(nil),           // 67: google.protobuf.StringValue
-	(*api.Notification)(nil),                 // 68: nakama.api.Notification
+	(*api.AnyRequest)(nil),                   // 64: nakama.api.AnyRequest
+	(*api.AnyResponseWriter)(nil),            // 65: nakama.api.AnyResponseWriter
+	(*wrapperspb.BoolValue)(nil),             // 66: google.protobuf.BoolValue
+	(*wrapperspb.Int32Value)(nil),            // 67: google.protobuf.Int32Value
+	(*timestamppb.Timestamp)(nil),            // 68: google.protobuf.Timestamp
+	(*wrapperspb.StringValue)(nil),           // 69: google.protobuf.StringValue
+	(*api.Notification)(nil),                 // 70: nakama.api.Notification
 }
 var file_realtime_proto_depIdxs = []int32{
 	3,   // 0: nakama.realtime.Envelope.channel:type_name -> nakama.realtime.Channel
@@ -4904,64 +4943,66 @@ var file_realtime_proto_depIdxs = []int32{
 	39,  // 46: nakama.realtime.Envelope.party_data:type_name -> nakama.realtime.PartyData
 	40,  // 47: nakama.realtime.Envelope.party_data_send:type_name -> nakama.realtime.PartyDataSend
 	41,  // 48: nakama.realtime.Envelope.party_presence_event:type_name -> nakama.realtime.PartyPresenceEvent
-	26,  // 49: nakama.realtime.Envelope.party_update:type_name -> nakama.realtime.PartyUpdate
-	52,  // 50: nakama.realtime.Channel.presences:type_name -> nakama.realtime.UserPresence
-	52,  // 51: nakama.realtime.Channel.self:type_name -> nakama.realtime.UserPresence
-	64,  // 52: nakama.realtime.ChannelJoin.persistence:type_name -> google.protobuf.BoolValue
-	64,  // 53: nakama.realtime.ChannelJoin.hidden:type_name -> google.protobuf.BoolValue
-	65,  // 54: nakama.realtime.ChannelMessageAck.code:type_name -> google.protobuf.Int32Value
-	66,  // 55: nakama.realtime.ChannelMessageAck.create_time:type_name -> google.protobuf.Timestamp
-	66,  // 56: nakama.realtime.ChannelMessageAck.update_time:type_name -> google.protobuf.Timestamp
-	64,  // 57: nakama.realtime.ChannelMessageAck.persistent:type_name -> google.protobuf.BoolValue
-	52,  // 58: nakama.realtime.ChannelPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
-	52,  // 59: nakama.realtime.ChannelPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
-	53,  // 60: nakama.realtime.Error.context:type_name -> nakama.realtime.Error.ContextEntry
-	67,  // 61: nakama.realtime.Match.label:type_name -> google.protobuf.StringValue
-	52,  // 62: nakama.realtime.Match.presences:type_name -> nakama.realtime.UserPresence
-	52,  // 63: nakama.realtime.Match.self:type_name -> nakama.realtime.UserPresence
-	52,  // 64: nakama.realtime.MatchData.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 65: nakama.realtime.MatchDataSend.presences:type_name -> nakama.realtime.UserPresence
-	54,  // 66: nakama.realtime.MatchJoin.metadata:type_name -> nakama.realtime.MatchJoin.MetadataEntry
-	52,  // 67: nakama.realtime.MatchPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
-	52,  // 68: nakama.realtime.MatchPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
-	55,  // 69: nakama.realtime.MatchmakerAdd.string_properties:type_name -> nakama.realtime.MatchmakerAdd.StringPropertiesEntry
-	56,  // 70: nakama.realtime.MatchmakerAdd.numeric_properties:type_name -> nakama.realtime.MatchmakerAdd.NumericPropertiesEntry
-	65,  // 71: nakama.realtime.MatchmakerAdd.count_multiple:type_name -> google.protobuf.Int32Value
-	57,  // 72: nakama.realtime.MatchmakerMatched.users:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser
-	57,  // 73: nakama.realtime.MatchmakerMatched.self:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser
-	68,  // 74: nakama.realtime.Notifications.notifications:type_name -> nakama.api.Notification
-	52,  // 75: nakama.realtime.Party.self:type_name -> nakama.realtime.UserPresence
-	52,  // 76: nakama.realtime.Party.leader:type_name -> nakama.realtime.UserPresence
-	52,  // 77: nakama.realtime.Party.presences:type_name -> nakama.realtime.UserPresence
-	52,  // 78: nakama.realtime.PartyPromote.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 79: nakama.realtime.PartyLeader.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 80: nakama.realtime.PartyAccept.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 81: nakama.realtime.PartyRemove.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 82: nakama.realtime.PartyJoinRequest.presences:type_name -> nakama.realtime.UserPresence
-	60,  // 83: nakama.realtime.PartyMatchmakerAdd.string_properties:type_name -> nakama.realtime.PartyMatchmakerAdd.StringPropertiesEntry
-	61,  // 84: nakama.realtime.PartyMatchmakerAdd.numeric_properties:type_name -> nakama.realtime.PartyMatchmakerAdd.NumericPropertiesEntry
-	65,  // 85: nakama.realtime.PartyMatchmakerAdd.count_multiple:type_name -> google.protobuf.Int32Value
-	52,  // 86: nakama.realtime.PartyData.presence:type_name -> nakama.realtime.UserPresence
-	52,  // 87: nakama.realtime.PartyPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
-	52,  // 88: nakama.realtime.PartyPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
-	52,  // 89: nakama.realtime.Status.presences:type_name -> nakama.realtime.UserPresence
-	52,  // 90: nakama.realtime.StatusPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
-	52,  // 91: nakama.realtime.StatusPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
-	67,  // 92: nakama.realtime.StatusUpdate.status:type_name -> google.protobuf.StringValue
-	49,  // 93: nakama.realtime.StreamData.stream:type_name -> nakama.realtime.Stream
-	52,  // 94: nakama.realtime.StreamData.sender:type_name -> nakama.realtime.UserPresence
-	49,  // 95: nakama.realtime.StreamPresenceEvent.stream:type_name -> nakama.realtime.Stream
-	52,  // 96: nakama.realtime.StreamPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
-	52,  // 97: nakama.realtime.StreamPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
-	67,  // 98: nakama.realtime.UserPresence.status:type_name -> google.protobuf.StringValue
-	52,  // 99: nakama.realtime.MatchmakerMatched.MatchmakerUser.presence:type_name -> nakama.realtime.UserPresence
-	58,  // 100: nakama.realtime.MatchmakerMatched.MatchmakerUser.string_properties:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser.StringPropertiesEntry
-	59,  // 101: nakama.realtime.MatchmakerMatched.MatchmakerUser.numeric_properties:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser.NumericPropertiesEntry
-	102, // [102:102] is the sub-list for method output_type
-	102, // [102:102] is the sub-list for method input_type
-	102, // [102:102] is the sub-list for extension type_name
-	102, // [102:102] is the sub-list for extension extendee
-	0,   // [0:102] is the sub-list for field type_name
+	64,  // 49: nakama.realtime.Envelope.any_request:type_name -> nakama.api.AnyRequest
+	65,  // 50: nakama.realtime.Envelope.any_response_writer:type_name -> nakama.api.AnyResponseWriter
+	26,  // 51: nakama.realtime.Envelope.party_update:type_name -> nakama.realtime.PartyUpdate
+	52,  // 52: nakama.realtime.Channel.presences:type_name -> nakama.realtime.UserPresence
+	52,  // 53: nakama.realtime.Channel.self:type_name -> nakama.realtime.UserPresence
+	66,  // 54: nakama.realtime.ChannelJoin.persistence:type_name -> google.protobuf.BoolValue
+	66,  // 55: nakama.realtime.ChannelJoin.hidden:type_name -> google.protobuf.BoolValue
+	67,  // 56: nakama.realtime.ChannelMessageAck.code:type_name -> google.protobuf.Int32Value
+	68,  // 57: nakama.realtime.ChannelMessageAck.create_time:type_name -> google.protobuf.Timestamp
+	68,  // 58: nakama.realtime.ChannelMessageAck.update_time:type_name -> google.protobuf.Timestamp
+	66,  // 59: nakama.realtime.ChannelMessageAck.persistent:type_name -> google.protobuf.BoolValue
+	52,  // 60: nakama.realtime.ChannelPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
+	52,  // 61: nakama.realtime.ChannelPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
+	53,  // 62: nakama.realtime.Error.context:type_name -> nakama.realtime.Error.ContextEntry
+	69,  // 63: nakama.realtime.Match.label:type_name -> google.protobuf.StringValue
+	52,  // 64: nakama.realtime.Match.presences:type_name -> nakama.realtime.UserPresence
+	52,  // 65: nakama.realtime.Match.self:type_name -> nakama.realtime.UserPresence
+	52,  // 66: nakama.realtime.MatchData.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 67: nakama.realtime.MatchDataSend.presences:type_name -> nakama.realtime.UserPresence
+	54,  // 68: nakama.realtime.MatchJoin.metadata:type_name -> nakama.realtime.MatchJoin.MetadataEntry
+	52,  // 69: nakama.realtime.MatchPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
+	52,  // 70: nakama.realtime.MatchPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
+	55,  // 71: nakama.realtime.MatchmakerAdd.string_properties:type_name -> nakama.realtime.MatchmakerAdd.StringPropertiesEntry
+	56,  // 72: nakama.realtime.MatchmakerAdd.numeric_properties:type_name -> nakama.realtime.MatchmakerAdd.NumericPropertiesEntry
+	67,  // 73: nakama.realtime.MatchmakerAdd.count_multiple:type_name -> google.protobuf.Int32Value
+	57,  // 74: nakama.realtime.MatchmakerMatched.users:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser
+	57,  // 75: nakama.realtime.MatchmakerMatched.self:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser
+	70,  // 76: nakama.realtime.Notifications.notifications:type_name -> nakama.api.Notification
+	52,  // 77: nakama.realtime.Party.self:type_name -> nakama.realtime.UserPresence
+	52,  // 78: nakama.realtime.Party.leader:type_name -> nakama.realtime.UserPresence
+	52,  // 79: nakama.realtime.Party.presences:type_name -> nakama.realtime.UserPresence
+	52,  // 80: nakama.realtime.PartyPromote.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 81: nakama.realtime.PartyLeader.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 82: nakama.realtime.PartyAccept.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 83: nakama.realtime.PartyRemove.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 84: nakama.realtime.PartyJoinRequest.presences:type_name -> nakama.realtime.UserPresence
+	60,  // 85: nakama.realtime.PartyMatchmakerAdd.string_properties:type_name -> nakama.realtime.PartyMatchmakerAdd.StringPropertiesEntry
+	61,  // 86: nakama.realtime.PartyMatchmakerAdd.numeric_properties:type_name -> nakama.realtime.PartyMatchmakerAdd.NumericPropertiesEntry
+	67,  // 87: nakama.realtime.PartyMatchmakerAdd.count_multiple:type_name -> google.protobuf.Int32Value
+	52,  // 88: nakama.realtime.PartyData.presence:type_name -> nakama.realtime.UserPresence
+	52,  // 89: nakama.realtime.PartyPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
+	52,  // 90: nakama.realtime.PartyPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
+	52,  // 91: nakama.realtime.Status.presences:type_name -> nakama.realtime.UserPresence
+	52,  // 92: nakama.realtime.StatusPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
+	52,  // 93: nakama.realtime.StatusPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
+	69,  // 94: nakama.realtime.StatusUpdate.status:type_name -> google.protobuf.StringValue
+	49,  // 95: nakama.realtime.StreamData.stream:type_name -> nakama.realtime.Stream
+	52,  // 96: nakama.realtime.StreamData.sender:type_name -> nakama.realtime.UserPresence
+	49,  // 97: nakama.realtime.StreamPresenceEvent.stream:type_name -> nakama.realtime.Stream
+	52,  // 98: nakama.realtime.StreamPresenceEvent.joins:type_name -> nakama.realtime.UserPresence
+	52,  // 99: nakama.realtime.StreamPresenceEvent.leaves:type_name -> nakama.realtime.UserPresence
+	69,  // 100: nakama.realtime.UserPresence.status:type_name -> google.protobuf.StringValue
+	52,  // 101: nakama.realtime.MatchmakerMatched.MatchmakerUser.presence:type_name -> nakama.realtime.UserPresence
+	58,  // 102: nakama.realtime.MatchmakerMatched.MatchmakerUser.string_properties:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser.StringPropertiesEntry
+	59,  // 103: nakama.realtime.MatchmakerMatched.MatchmakerUser.numeric_properties:type_name -> nakama.realtime.MatchmakerMatched.MatchmakerUser.NumericPropertiesEntry
+	104, // [104:104] is the sub-list for method output_type
+	104, // [104:104] is the sub-list for method input_type
+	104, // [104:104] is the sub-list for extension type_name
+	104, // [104:104] is the sub-list for extension extendee
+	0,   // [0:104] is the sub-list for field type_name
 }
 
 func init() { file_realtime_proto_init() }
@@ -5019,6 +5060,8 @@ func file_realtime_proto_init() {
 		(*Envelope_PartyData)(nil),
 		(*Envelope_PartyDataSend)(nil),
 		(*Envelope_PartyPresenceEvent)(nil),
+		(*Envelope_AnyRequest)(nil),
+		(*Envelope_AnyResponseWriter)(nil),
 		(*Envelope_PartyUpdate)(nil),
 	}
 	file_realtime_proto_msgTypes[14].OneofWrappers = []any{

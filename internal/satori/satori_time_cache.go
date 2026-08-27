@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/runtime"
+	"github.com/doublemo/nakama-common/runtime"
 )
 
 var _ satoriCache[runtime.SatoriLabeled, struct{}] = (*satoriTimeCache[runtime.SatoriLabeled, struct{}])(nil)

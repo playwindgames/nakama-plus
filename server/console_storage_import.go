@@ -28,8 +28,8 @@ import (
 	"strings"
 
 	"github.com/gofrs/uuid/v5"
-	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama/v3/console/acl"
+	"github.com/doublemo/nakama-common/api"
+	"github.com/doublemo/nakama-plus/v3/console/acl"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )

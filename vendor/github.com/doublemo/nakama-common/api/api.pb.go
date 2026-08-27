@@ -9595,8 +9595,8 @@ const file_api_proto_rawDesc = "" +
 	"\x04BEST\x10\x01\x12\a\n" +
 	"\x03SET\x10\x02\x12\r\n" +
 	"\tINCREMENT\x10\x03\x12\r\n" +
-	"\tDECREMENT\x10\x04Bc\n" +
-	"\x19com.heroiclabs.nakama.apiB\tNakamaApiP\x01Z'github.com/heroiclabs/nakama-common/api\xaa\x02\x0fNakama.Protobufb\x06proto3"
+	"\tDECREMENT\x10\x04Ba\n" +
+	"\x19com.heroiclabs.nakama.apiB\tNakamaApiP\x01Z%github.com/doublemo/nakama-common/api\xaa\x02\x0fNakama.Protobufb\x06proto3"
 
 var (
 	file_api_proto_rawDescOnce sync.Once

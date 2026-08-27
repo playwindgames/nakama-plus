@@ -14,7 +14,7 @@ package acl
 import (
 	"testing"
 
-	"github.com/heroiclabs/nakama/v3/console"
+	"github.com/doublemo/nakama-plus/v3/console"
 	"github.com/stretchr/testify/assert"
 )
 

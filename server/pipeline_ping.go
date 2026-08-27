@@ -17,7 +17,7 @@ package server
 import (
 	"context"
 
-	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/rtapi"
 	"go.uber.org/zap"
 )
 

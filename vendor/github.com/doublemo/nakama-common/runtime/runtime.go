@@ -94,8 +94,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/heroiclabs/nakama-common/api"
-	"github.com/heroiclabs/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/api"
+	"github.com/doublemo/nakama-common/rtapi"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -905,6 +905,15 @@ type Initializer interface {
 
 	// RegisterConsoleHttp attaches a new HTTP handler to a specified path on the main console API server endpoint.
 	RegisterConsoleHttp(pathPattern string, handler func(http.ResponseWriter, *http.Request), methods ...string) error
+
+	// RegisterBeforeAny can be used to execute additional business logic before invoking the microservice interface.
+	RegisterBeforeAny(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, in *api.AnyRequest) (*api.AnyRequest, error)) error
+
+	// RegisterAfterAny can be used to execute additional business logic after invoking the microservice interface.
+	RegisterAfterAny(fn func(ctx context.Context, logger Logger, db *sql.DB, nk NakamaModule, out *api.AnyResponseWriter, in *api.AnyRequest) error) error
+
+	// RegisterEvent can be used to define a function handler that triggers when peer events are received or generated.
+	RegisterEventPeer(fn func(ctx context.Context, logger Logger, evt *api.AnyRequest)) error
 }
 
 type PresenceReason uint8
@@ -1249,6 +1258,7 @@ type NakamaModule interface {
 
 	GetSatori() Satori
 	GetFleetManager() FleetManager
+	GetPeer() (Peer, bool)
 }
 
 /*

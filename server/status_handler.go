@@ -20,7 +20,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/heroiclabs/nakama/v3/console"
+	"github.com/doublemo/nakama-plus/v3/console"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

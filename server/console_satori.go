@@ -17,9 +17,9 @@ package server
 import (
 	"context"
 
-	"github.com/heroiclabs/nakama-common/runtime"
-	"github.com/heroiclabs/nakama/v3/console"
-	"github.com/heroiclabs/nakama/v3/internal/satori"
+	"github.com/doublemo/nakama-common/runtime"
+	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/doublemo/nakama-plus/v3/internal/satori"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

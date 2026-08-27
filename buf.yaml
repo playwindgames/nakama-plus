@@ -5,7 +5,7 @@ deps:
 modules:
   - path: apigrpc
   - path: console
-  - path: vendor/github.com/heroiclabs/nakama-common
+  - path: vendor/github.com/doublemo/nakama-common
 lint:
   use:
     - STANDARD
