@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/doublemo/nakama-common/api"
+	"github.com/doublemo/nakama-kit/kit"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -51,6 +52,7 @@ type LocalLeaderboardScheduler struct {
 	fnLeaderboardReset RuntimeLeaderboardResetFunction
 	fnTournamentReset  RuntimeTournamentResetFunction
 	fnTournamentEnd    RuntimeTournamentEndFunction
+	fnCanRun           func(string) bool
 
 	started bool
 	active  *atomic.Uint32
@@ -104,6 +106,7 @@ func (ls *LocalLeaderboardScheduler) Start(runtime *Runtime) {
 	ls.fnLeaderboardReset = runtime.LeaderboardReset()
 	ls.fnTournamentReset = runtime.TournamentReset()
 	ls.fnTournamentEnd = runtime.TournamentEnd()
+	ls.installCanRun(runtime)
 
 	for i := 0; i < ls.config.GetLeaderboard().CallbackQueueWorkers; i++ {
 		go ls.invokeCallback()
@@ -112,6 +115,39 @@ func (ls *LocalLeaderboardScheduler) Start(runtime *Runtime) {
 	go ls.scheduleLoop()
 
 	ls.Update()
+}
+
+// installCanRun 装配集群归属判定：决定某个榜的回调是否由本节点执行。
+// 集群里每个节点都会把到期的榜放进 queue，若不判定归属，周榜结算会被执行 N 次。
+//
+// 🔴 peer MUST 在闭包内部取，不得在装配时快照 —— main.go 里
+// leaderboardScheduler.Start(runtime) 在 NewLocalPeer 之前，装配时取必然拿到
+// ok == false，而下面那条兜底会让每个节点都认为回调归自己 ⇒ 多节点重复发奖，
+// 且不报错、不打日志。
+func (ls *LocalLeaderboardScheduler) installCanRun(runtime *Runtime) {
+	ls.fnCanRun = func(key string) bool {
+		peer, ok := runtime.GetPeer()
+		if !ok {
+			// 未接入集群：单节点行为，总是可运行。
+			return true
+		}
+
+		service, ok := peer.GetServiceRegistry().Get(kit.SERVICE_NAME)
+		if !ok {
+			// fail-closed：宁可漏一次也不能重复发奖。
+			// 但必须可观测 —— 注册中心抖动时每个节点都走到这里，
+			// 结果是全集群静默丢回调（spec D8）。
+			ls.logger.Warn("Leaderboard scheduler cannot resolve service registry, skipping callback",
+				zap.String("leaderboard_id", key))
+			return false
+		}
+
+		node := service.GetNodeByByHashRing(key)
+		if node == "" && peer.Leader() {
+			return true
+		}
+		return node == peer.Local().Name()
+	}
 }
 
 func (ls *LocalLeaderboardScheduler) Pause() {
