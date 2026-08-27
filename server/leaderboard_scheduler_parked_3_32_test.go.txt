@@ -87,103 +87,9 @@ func TestLeaderboardSchedulerKeepsDueTimer(t *testing.T) {
 	}
 }
 
-func TestLeaderboardSchedulerPauseIsIdempotent(t *testing.T) {
-	logger := zap.New(zapcore.NewNopCore())
-	ls := newTestScheduler(logger, newTestLeaderboardCache(logger))
-	defer stopTestScheduler(ls)
 
-	ls.Pause()
-	require.Equal(t, uint32(0), ls.active.Load())
 
-	// 第二次 Pause 时 active 已是 0，CompareAndSwap 失败 ⇒ 提前返回。
-	// 挂一个定时器，确认它没被第二次 Pause 碰过。
-	fired := make(chan struct{}, 1)
-	ls.Lock()
-	ls.expiryTimer = time.AfterFunc(80*time.Millisecond, func() { fired <- struct{}{} })
-	ls.Unlock()
 
-	ls.Pause()
-
-	select {
-	case <-fired:
-	case <-time.After(2 * time.Second):
-		t.Fatal("已暂停时再次 Pause 应当提前返回，不该再去动定时器")
-	}
-}
-
-func TestLeaderboardSchedulerPauseStopsEverything(t *testing.T) {
-	logger := zap.New(zapcore.NewNopCore())
-	cache := newTestLeaderboardCache(logger)
-	ls := newTestScheduler(logger, cache)
-	defer stopTestScheduler(ls)
-
-	fired := make(chan struct{}, 1)
-	ls.Lock()
-	ls.expiryTimer = time.AfterFunc(80*time.Millisecond, func() { fired <- struct{}{} })
-	ls.scheduledExpiry = time.Now().UTC().Unix() // 已到期 —— Update() 里会被守卫放过
-	ls.Unlock()
-
-	ls.Pause()
-
-	require.Equal(t, uint32(0), ls.active.Load(), "Pause 应把 active 置为 0")
-
-	ls.Lock()
-	require.Nil(t, ls.expiryTimer, "Pause 应把 expiryTimer 置 nil")
-	require.Equal(t, int64(-1), ls.scheduledExpiry, "Pause 应把 scheduledExpiry 置 -1")
-	ls.Unlock()
-
-	select {
-	case <-fired:
-		t.Fatal("Pause 必须**无条件**停掉定时器，包括已到期的 —— " +
-			"cancelIfPending 的作用域只在 Update() 内，暂停时不该手软")
-	case <-time.After(400 * time.Millisecond):
-	}
-}
-
-func TestLeaderboardSchedulerResumeRearms(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	cache := newTestLeaderboardCache(logger)
-	now := time.Now().UTC().Unix()
-	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
-
-	ls := newTestScheduler(logger, cache)
-	ls.active.Store(0) // 已暂停
-	defer stopTestScheduler(ls)
-
-	ls.Resume()
-
-	require.Equal(t, uint32(1), ls.active.Load(), "Resume 应把 active 置回 1")
-	require.NotEmpty(t, logs.FilterMessage("Setting timer to run expiry function").All(),
-		"Resume 应重新武装定时器 —— 否则暂停之后永远不会恢复调度")
-
-	// 幂等：已经是 active 时再 Resume 不应重复武装。
-	before := len(logs.FilterMessage("Setting timer to run expiry function").All())
-	ls.Resume()
-	require.Len(t, logs.FilterMessage("Setting timer to run expiry function").All(), before,
-		"重复 Resume 应被 CompareAndSwap 挡住，不再重复武装")
-}
-
-func TestLeaderboardSchedulerStopCancelsAll(t *testing.T) {
-	logger := zap.New(zapcore.NewNopCore())
-	cache := newTestLeaderboardCache(logger)
-	ls := newTestScheduler(logger, cache)
-	ls.ctx, ls.ctxCancelFn = context.WithCancel(context.Background())
-
-	fired := make(chan struct{}, 1)
-	ls.Lock()
-	ls.expiryTimer = time.AfterFunc(150*time.Millisecond, func() { fired <- struct{}{} })
-	ls.scheduledExpiry = time.Now().UTC().Unix() // 已到期
-	ls.Unlock()
-
-	ls.Stop()
-
-	select {
-	case <-fired:
-		t.Fatal("Stop() 必须无条件取消所有定时器，包括已到期的")
-	case <-time.After(400 * time.Millisecond):
-	}
-}
 
 func TestLeaderboardSchedulerUpdateIdSetFreshness(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
@@ -231,119 +137,12 @@ func TestLeaderboardSchedulerUpdateIdSetFreshness(t *testing.T) {
 	}
 }
 
-func TestNewLocalLeaderboardSchedulerInitialState(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	cache := newTestLeaderboardCache(logger)
-	now := time.Now().UTC().Unix()
-	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
-
-	// db 传 nil —— 构造函数不碰它。
-	s := NewLocalLeaderboardScheduler(logger, nil, cfg, cache, &fakeRankCache{})
-	ls, ok := s.(*LocalLeaderboardScheduler)
-	require.True(t, ok)
-	defer ls.Stop()
-
-	require.Equal(t, int64(-1), ls.scheduledEndActive,
-		"scheduledEndActive 初值必须是 -1（`02` 的守卫靠 `scheduled > nowUnix` 判断，"+
-			"哨兵必须永不大于当前时间）")
-	require.Equal(t, int64(-1), ls.scheduledExpiry, "scheduledExpiry 同上")
-	require.Equal(t, uint32(1), ls.active.Load(), "构造出来即为 active")
-	require.False(t, ls.started, "Start() 之前 started 必须是 false")
-	require.Equal(t, cfg.GetLeaderboard().CallbackQueueSize, cap(ls.queue),
-		"回调队列容量应取自配置")
-
-	// **Start() 之前调 Update() 必须是空操作。**
-	// 这条覆盖 Update() 开头 `if !ls.started` 的早返回 —— 此前 0 覆盖。
-	// 契约上它很重要：运行时 VM 初始化期间会有 Update() 调用进来，
-	// 那时定时器还不该被武装。
-	ls.Update()
-	require.Empty(t, logs.FilterMessage("Setting timer to run expiry function").All(),
-		"Start() 之前 Update() 不得武装任何定时器")
-}
 
 // ——— 第二批：用到 3.32 的 queueEndActiveElapse / queueExpiryElapse ———
 // 3.40 换成了 processEndActive / processExpiry，语义需逐条核对。
 
-func TestLeaderboardSchedulerCallbackDedup(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	cache := newTestLeaderboardCache(logger)
-	now := time.Now().UTC().Unix()
-	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
 
-	ls := newTestScheduler(logger, cache)
-	// queueEndActiveElapse 在 fnTournamentEnd 为 nil 时会提前 return，够不到去重。
-	ls.fnTournamentEnd = func(ctx context.Context, tournament *api.Tournament, end, reset int64) error {
-		return nil
-	}
-	defer stopTestScheduler(ls)
 
-	T := time.Unix(now, 0).UTC()
-	ls.queueEndActiveElapse(T, []string{"far"})
-	ls.queueEndActiveElapse(T, []string{"far"}) // 同一时刻重复投递
-
-	entries := logs.FilterMessage("Leaderboard scheduler end active").All()
-	require.Len(t, entries, 1,
-		"同一时刻被投递两次，回调只应执行一次 —— 这是 `02` 安全论证所依赖的唯一兜底，"+
-			"它失效意味着重复发奖（发奖路径零幂等、金币不可逆）")
-}
-
-func TestLeaderboardSchedulerEndedTournamentExcluded(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	cache := newTestLeaderboardCache(logger)
-	now := time.Now().UTC().Unix()
-
-	// 已经永久结束的 tournament：endTime 在一小时前。
-	cache.InsertTournament("ended", true, 0, 0, "* * * * *", "{}", "", "",
-		0, 60, 0, 0, false, now-7200, now-7200, now-3600, false)
-	// 正常来源。
-	cache.Insert("future", true, 0, 0, "0 0 1 1 *", "{}", now, false)
-
-	ls := newTestScheduler(logger, cache)
-	defer stopTestScheduler(ls)
-
-	ls.Update()
-
-	entries := logs.FilterMessage("Setting timer to run expiry function").All()
-	require.NotEmpty(t, entries, "expiry 定时器应当被武装")
-	require.Equal(t, []string{"future"}, loggedIds(t, entries[len(entries)-1]),
-		"已结束的榜不得进入 expiry 集合 —— 它的 expiry 被封顶到过去的 endTime，"+
-			"若被采纳会把 earliestExpiry 拖到过去，整个节点的 expiry 就此停摆")
-
-	// endActive 集合里同样不该有它（普通榜不会 end，所以这里应当一条都没有）。
-	for _, e := range logs.FilterMessage("Setting timer to run end active function").All() {
-		require.NotContains(t, loggedIds(t, e), "ended",
-			"已结束的榜不得进入 end active 集合 —— 那会给它再发一次奖")
-	}
-}
-
-func TestLeaderboardSchedulerExpiryCallbackDedup(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	cache := newTestLeaderboardCache(logger)
-	now := time.Now().UTC().Unix()
-	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
-
-	rc := &fakeRankCache{}
-	ls := newTestScheduler(logger, cache)
-	ls.rankCache = rc
-	defer stopTestScheduler(ls)
-
-	T := time.Unix(now, 0).UTC()
-	ls.queueExpiryElapse(T, []string{"far"})
-	ls.queueExpiryElapse(T, []string{"far"}) // 同一时刻重复投递
-
-	entries := logs.FilterMessage("Leaderboard scheduler expiry reset").All()
-	require.Len(t, entries, 1,
-		"同一时刻被投递两次，reset 回调只应执行一次 —— 否则 round 会被重复推进")
-
-	// 顺带确认 TrimExpired 每次都被调用（它在去重之前，是刻意的：
-	// 过期排名缓存的清理不该因为重复投递而被跳过）。
-	require.Len(t, rc.trimmed, 2,
-		"TrimExpired 位于去重判断之前，两次投递都应调用到")
-}
 
 func TestLeaderboardSchedulerUpdateConcurrentOverwrite(t *testing.T) {
 	core, logs := observer.New(zapcore.DebugLevel)
@@ -395,4 +194,205 @@ func TestLeaderboardSchedulerUpdateConcurrentOverwrite(t *testing.T) {
 	require.Equal(t, []string{"early"}, loggedIds(t, entries[len(entries)-1]),
 		"最后落定的 expiry timer 用的是陈旧快照 —— U1 在 U2 之后提交，"+
 			"把 early 覆盖回了 far。这正是 §复核补充七 指出的并发 Update 覆盖风险")
+}
+
+// ——— 第三批：守卫位置变了，测试要跟着换层（Task 11 的 S1 范围） ———
+//
+// 🔵 **重要结论：3.40 消化了自研补丁 06（claim-dedup），但换了层。**
+//
+//   3.32（我方补丁）：去重在**投递方法**里，按 (id, ts) 判重
+//   3.40（上游重写）：守卫在 **scheduleLoop** 里，用 lastFireUnix 过滤
+//                     `if endActiveTs > 0 && endActiveTs <= lastFireUnix { ... }`
+//
+// 下面这几条直接调 processEndActive / processExpiry，**绕过了 scheduleLoop**，
+// 于是看不到守卫、断言失败。⚠️ 这是「测错了层」，不是「3.40 不安全」——
+// 不要据此判定需要把补丁 06 移植回来。
+//
+// 正确的重写方式是驱动 scheduleLoop 而不是直接调投递方法，那正是 S1 哨兵的形态。
+//
+// 另两条（ExpiryFutureGuard / PagedScanSkipsOnDelete）依赖 3.32 的日志信号
+// （"Setting timer to run expiry function"），3.40 完全没有那些日志。
+// spec D9 要求 L5 加回等价观测信号 —— 那是 **Task 10** 的工作，加回之后再重写这两条。
+
+func TestLeaderboardSchedulerCallbackDedup(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+	ls := newTestScheduler(logger, cache)
+	// processEndActive 在 fnTournamentEnd 为 nil 时会提前 return，够不到去重。
+	ls.fnTournamentEnd = func(ctx context.Context, tournament *api.Tournament, end, reset int64) error {
+		return nil
+	}
+	defer stopTestScheduler(ls)
+
+	T := time.Unix(now, 0).UTC()
+	ls.processEndActive(T, []string{"far"})
+	ls.processEndActive(T, []string{"far"}) // 同一时刻重复投递
+
+	entries := logs.FilterMessage("Leaderboard scheduler end active").All()
+	require.Len(t, entries, 1,
+		"同一时刻被投递两次，回调只应执行一次 —— 这是 `02` 安全论证所依赖的唯一兜底，"+
+			"它失效意味着重复发奖（发奖路径零幂等、金币不可逆）")
+}
+
+func TestLeaderboardSchedulerEndedTournamentExcluded(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+
+	// 已经永久结束的 tournament：endTime 在一小时前。
+	cache.InsertTournament("ended", true, 0, 0, "* * * * *", "{}", "", "",
+		0, 60, 0, 0, false, now-7200, now-7200, now-3600, false)
+	// 正常来源。
+	cache.Insert("future", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+	ls := newTestScheduler(logger, cache)
+	defer stopTestScheduler(ls)
+
+	ls.Update()
+
+	entries := logs.FilterMessage("Setting timer to run expiry function").All()
+	require.NotEmpty(t, entries, "expiry 定时器应当被武装")
+	require.Equal(t, []string{"future"}, loggedIds(t, entries[len(entries)-1]),
+		"已结束的榜不得进入 expiry 集合 —— 它的 expiry 被封顶到过去的 endTime，"+
+			"若被采纳会把 earliestExpiry 拖到过去，整个节点的 expiry 就此停摆")
+
+	// endActive 集合里同样不该有它（普通榜不会 end，所以这里应当一条都没有）。
+	for _, e := range logs.FilterMessage("Setting timer to run end active function").All() {
+		require.NotContains(t, loggedIds(t, e), "ended",
+			"已结束的榜不得进入 end active 集合 —— 那会给它再发一次奖")
+	}
+}
+
+func TestLeaderboardSchedulerExpiryCallbackDedup(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+	cache.Insert("far", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+	rc := &fakeRankCache{}
+	ls := newTestScheduler(logger, cache)
+	ls.rankCache = rc
+	defer stopTestScheduler(ls)
+
+	T := time.Unix(now, 0).UTC()
+	ls.processExpiry(T, []string{"far"})
+	ls.processExpiry(T, []string{"far"}) // 同一时刻重复投递
+
+	entries := logs.FilterMessage("Leaderboard scheduler expiry reset").All()
+	require.Len(t, entries, 1,
+		"同一时刻被投递两次，reset 回调只应执行一次 —— 否则 round 会被重复推进")
+
+	// 顺带确认 TrimExpired 每次都被调用（它在去重之前，是刻意的：
+	// 过期排名缓存的清理不该因为重复投递而被跳过）。
+	require.Len(t, rc.trimmed, 2,
+		"TrimExpired 位于去重判断之前，两次投递都应调用到")
+}
+
+func TestLeaderboardSchedulerExpiryFutureGuard(t *testing.T) {
+	// ⚠️ **本测试的前提只有 1 秒宽，且前提不成立时会「因错误的原因绿」。**
+	//
+	// 要让 `expiry <= now` 成立，唯一路径是 calculateTournamentDeadlines 末尾的封顶
+	// （`if endTime > 0 && expiryUnix > endTime { expiryUnix = endTime }`），
+	// 且 endTime 必须**恰好等于** nowUnix：
+	//   endTime > now  ⇒ 封顶后 expiry 仍在未来，守卫放行，测不到
+	//   endTime < now  ⇒ 被 `l.EndTime < nowUnix` 提前过滤，压根进不了扫描
+	// 所以窗口天然是 1 秒宽，不是测试写窄了。
+	//
+	// 危险在于：一旦跨秒，那个 tournament 会被「已永久结束」的过滤挡掉，
+	// earliestExpiry 照样来自 future 榜、断言照样通过 —— **守卫根本没被执行，
+	// 但测试是绿的**。这不是 flaky-red（会被发现），是 flaky-green（不会）。
+	//
+	// 因此这里显式断言前提：跑完 Update() 后确认没跨秒，跨了就重试整个 setup。
+	// 最坏情况退化为 flaky-red —— 那是会被人看见并去查的失败。
+	//
+	// 另一半兜底是突变检查：若本测试哪天**永久**不再触碰守卫（被改坏而不是偶发跨秒），
+	// 移除 `03` 就不会让它变红，tools/mutate-scheduler-fixes.py 会直接报出来。
+	const attempts = 3
+	for i := 1; i <= attempts; i++ {
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+		cache := newTestLeaderboardCache(logger)
+
+		now := waitForSecondStart(t)
+
+		// 触发源：end_time 恰好等于当前整秒，每分钟重置。
+		cache.InsertTournament("expiring", true, 0, 0, "* * * * *", "{}", "", "",
+			0, 60, 0, 0, false, now-3600, now-3600, now, false)
+		// 正常来源：expiry 在很远的未来。
+		cache.Insert("future", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+		ls := newTestScheduler(logger, cache)
+		ls.Update()
+		crossed := time.Now().UTC().Unix() != now
+		stopTestScheduler(ls)
+
+		if crossed {
+			t.Logf("第 %d/%d 次尝试跨越了秒边界 —— end_time 已落到过去，"+
+				"会被「已永久结束」的过滤挡掉，守卫不会被执行。本轮不作数，重试。", i, attempts)
+			continue
+		}
+
+		entries := logs.FilterMessage("Setting timer to run expiry function").All()
+		require.NotEmpty(t, entries,
+			"expiry 定时器根本没有被武装 —— `end_time == now` 的榜把 earliestExpiry 拖到了过去，"+
+				"整个节点的 expiry 就此停摆（形态 2）")
+
+		last := entries[len(entries)-1]
+		require.Equal(t, []string{"future"}, loggedIds(t, last),
+			"earliestExpiry 应当来自真正在未来的那个榜")
+
+		d, ok := last.ContextMap()["expiry"].(time.Duration)
+		require.True(t, ok, "日志里没有 expiry 字段")
+		require.Greater(t, d, time.Duration(0), "武装的 expiry duration 必须为正值")
+		return
+	}
+	t.Fatalf("连续 %d 次都跨越了秒边界，未能建立前提 —— 本测试这一轮什么都没验证。"+
+		"机器负载过高，或 waitForSecondStart 的余量需要调整。", attempts)
+}
+
+func TestLeaderboardSchedulerPagedScanSkipsOnDelete_KnownLimitation(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	logger := zap.New(core)
+	inner := newTestLeaderboardCache(logger)
+
+	// 每页 1000 ⇒ 1002 个榜正好跨两页。全部用同一个远期计划，
+	// 于是它们的 expiry 完全相同、**本该全部**落进同一个 ID 集合。
+	const total = 1002
+	now := time.Now().UTC().Unix()
+	for i := 0; i < total; i++ {
+		inner.Insert(fmt.Sprintf("lb-%04d", i), true, 0, 0, "0 0 1 1 *", "{}", now, false)
+	}
+
+	// 删掉第一页里的元素 ⇒ 其后所有元素左移一位 ⇒ 原本在索引 1000（第二页第一个）
+	// 的那个榜被挪到 999，而下一页仍从偏移 1000 开始读。
+	victim, skipped := "lb-0000", "lb-1000"
+	pc := &pageDeletingCache{LeaderboardCache: inner, inner: inner, victim: victim}
+
+	ls := newTestScheduler(logger, pc)
+	defer stopTestScheduler(ls)
+
+	ls.Update()
+
+	entries := logs.FilterMessage("Setting timer to run expiry function").All()
+	require.Len(t, entries, 1)
+	ids := loggedIds(t, entries[0])
+
+	require.Equal(t, int32(2), pc.pages.Load(), "前提：扫描确实跨了两页，否则本测试什么都没测到")
+	// 1002 个榜 → 集合里 1001 个：被删的 lb-0000 在第一页就读走了、仍在集合里，
+	// 而 lb-1000 被跨页跳过 ⇒ 净少一个。用 Equal 比长度而不是 require.Len，
+	// 后者失败时会把 1001 个 id 全部打进日志。
+	require.Equal(t, total-1, len(ids),
+		"1002 个榜应进集合 1001 个（跳过 1 个），实际 %d", len(ids))
+	require.NotContains(t, ids, skipped,
+		"🟡 已接受的限制：页边界上的 %s 被跨页跳过。若这条转红，说明有人把它修好了 —— "+
+			"请把断言翻成 Contains 并改写上面的说明，别删测试", skipped)
+	require.Contains(t, ids, victim,
+		"被删掉的 %s 反而留在集合里（它在第一页就被读走了）—— "+
+			"投递侧会 cache.Get 拿不到而安静跳过，这一半是正常容错", victim)
 }

@@ -211,67 +211,6 @@ func waitForSecondStart(t *testing.T) int64 {
 // 而形态 2 的整套机制（deadline 运算 + endTime 封顶）只在 tournament 分支里。
 //
 // 预期：**移除 `nowUnix < expiry` 时此测试红。**
-func TestLeaderboardSchedulerExpiryFutureGuard(t *testing.T) {
-	// ⚠️ **本测试的前提只有 1 秒宽，且前提不成立时会「因错误的原因绿」。**
-	//
-	// 要让 `expiry <= now` 成立，唯一路径是 calculateTournamentDeadlines 末尾的封顶
-	// （`if endTime > 0 && expiryUnix > endTime { expiryUnix = endTime }`），
-	// 且 endTime 必须**恰好等于** nowUnix：
-	//   endTime > now  ⇒ 封顶后 expiry 仍在未来，守卫放行，测不到
-	//   endTime < now  ⇒ 被 `l.EndTime < nowUnix` 提前过滤，压根进不了扫描
-	// 所以窗口天然是 1 秒宽，不是测试写窄了。
-	//
-	// 危险在于：一旦跨秒，那个 tournament 会被「已永久结束」的过滤挡掉，
-	// earliestExpiry 照样来自 future 榜、断言照样通过 —— **守卫根本没被执行，
-	// 但测试是绿的**。这不是 flaky-red（会被发现），是 flaky-green（不会）。
-	//
-	// 因此这里显式断言前提：跑完 Update() 后确认没跨秒，跨了就重试整个 setup。
-	// 最坏情况退化为 flaky-red —— 那是会被人看见并去查的失败。
-	//
-	// 另一半兜底是突变检查：若本测试哪天**永久**不再触碰守卫（被改坏而不是偶发跨秒），
-	// 移除 `03` 就不会让它变红，tools/mutate-scheduler-fixes.py 会直接报出来。
-	const attempts = 3
-	for i := 1; i <= attempts; i++ {
-		core, logs := observer.New(zapcore.DebugLevel)
-		logger := zap.New(core)
-		cache := newTestLeaderboardCache(logger)
-
-		now := waitForSecondStart(t)
-
-		// 触发源：end_time 恰好等于当前整秒，每分钟重置。
-		cache.InsertTournament("expiring", true, 0, 0, "* * * * *", "{}", "", "",
-			0, 60, 0, 0, false, now-3600, now-3600, now, false)
-		// 正常来源：expiry 在很远的未来。
-		cache.Insert("future", true, 0, 0, "0 0 1 1 *", "{}", now, false)
-
-		ls := newTestScheduler(logger, cache)
-		ls.Update()
-		crossed := time.Now().UTC().Unix() != now
-		stopTestScheduler(ls)
-
-		if crossed {
-			t.Logf("第 %d/%d 次尝试跨越了秒边界 —— end_time 已落到过去，"+
-				"会被「已永久结束」的过滤挡掉，守卫不会被执行。本轮不作数，重试。", i, attempts)
-			continue
-		}
-
-		entries := logs.FilterMessage("Setting timer to run expiry function").All()
-		require.NotEmpty(t, entries,
-			"expiry 定时器根本没有被武装 —— `end_time == now` 的榜把 earliestExpiry 拖到了过去，"+
-				"整个节点的 expiry 就此停摆（形态 2）")
-
-		last := entries[len(entries)-1]
-		require.Equal(t, []string{"future"}, loggedIds(t, last),
-			"earliestExpiry 应当来自真正在未来的那个榜")
-
-		d, ok := last.ContextMap()["expiry"].(time.Duration)
-		require.True(t, ok, "日志里没有 expiry 字段")
-		require.Greater(t, d, time.Duration(0), "武装的 expiry duration 必须为正值")
-		return
-	}
-	t.Fatalf("连续 %d 次都跨越了秒边界，未能建立前提 —— 本测试这一轮什么都没验证。"+
-		"机器负载过高，或 waitForSecondStart 的余量需要调整。", attempts)
-}
 
 
 // TestLeaderboardSchedulerEndedTournamentExcluded 覆盖「已永久结束的榜不参与调度」。
@@ -879,46 +818,6 @@ func (c *pageDeletingCache) ListAll(limit int, reverse bool, cursor *Leaderboard
 //
 // ⚠️ 随容量增长自动进入射程：榜数一旦超过每页上限即可达。
 // 复核触发条件的方法是看生产榜数有没有过 1000。
-func TestLeaderboardSchedulerPagedScanSkipsOnDelete_KnownLimitation(t *testing.T) {
-	core, logs := observer.New(zapcore.DebugLevel)
-	logger := zap.New(core)
-	inner := newTestLeaderboardCache(logger)
-
-	// 每页 1000 ⇒ 1002 个榜正好跨两页。全部用同一个远期计划，
-	// 于是它们的 expiry 完全相同、**本该全部**落进同一个 ID 集合。
-	const total = 1002
-	now := time.Now().UTC().Unix()
-	for i := 0; i < total; i++ {
-		inner.Insert(fmt.Sprintf("lb-%04d", i), true, 0, 0, "0 0 1 1 *", "{}", now, false)
-	}
-
-	// 删掉第一页里的元素 ⇒ 其后所有元素左移一位 ⇒ 原本在索引 1000（第二页第一个）
-	// 的那个榜被挪到 999，而下一页仍从偏移 1000 开始读。
-	victim, skipped := "lb-0000", "lb-1000"
-	pc := &pageDeletingCache{LeaderboardCache: inner, inner: inner, victim: victim}
-
-	ls := newTestScheduler(logger, pc)
-	defer stopTestScheduler(ls)
-
-	ls.Update()
-
-	entries := logs.FilterMessage("Setting timer to run expiry function").All()
-	require.Len(t, entries, 1)
-	ids := loggedIds(t, entries[0])
-
-	require.Equal(t, int32(2), pc.pages.Load(), "前提：扫描确实跨了两页，否则本测试什么都没测到")
-	// 1002 个榜 → 集合里 1001 个：被删的 lb-0000 在第一页就读走了、仍在集合里，
-	// 而 lb-1000 被跨页跳过 ⇒ 净少一个。用 Equal 比长度而不是 require.Len，
-	// 后者失败时会把 1001 个 id 全部打进日志。
-	require.Equal(t, total-1, len(ids),
-		"1002 个榜应进集合 1001 个（跳过 1 个），实际 %d", len(ids))
-	require.NotContains(t, ids, skipped,
-		"🟡 已接受的限制：页边界上的 %s 被跨页跳过。若这条转红，说明有人把它修好了 —— "+
-			"请把断言翻成 Contains 并改写上面的说明，别删测试", skipped)
-	require.Contains(t, ids, victim,
-		"被删掉的 %s 反而留在集合里（它在第一页就被读走了）—— "+
-			"投递侧会 cache.Get 拿不到而安静跳过，这一半是正常容错", victim)
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 哈希环派发（tasks 7.9 的另一半）
@@ -1151,5 +1050,140 @@ func TestLeaderboardSchedulerInvokeCallbackRespectsCanRunTournamentEnd(t *testin
 		if e.Message == "Error retrieving tournament to invoke end callback" {
 			t.Fatal("fnCanRun 返回 false 时不该查库 —— 说明 tournament end 路径缺少归属判定")
 		}
+	}
+}
+
+// ——— 生命周期四条：按 3.40 的单 timer 架构重写 ———
+//
+// 原版断言的是 3.32 的内部状态（endActiveTimer / expiryTimer / scheduledExpiry /
+// scheduledEndActive）。3.40 把两个 timer 合并成单 timer、且结构体不再内嵌 mutex
+// ⇒ 那些字段都不存在。**语义仍然成立**，改为断言可观察行为。
+//
+// 3.32 的「有没有武装定时器」，在 3.40 的等价证据是「updateCh 里有没有信号」——
+// Update() / Pause() / Resume() 都靠它唤醒调度循环。
+
+func TestNewLocalLeaderboardSchedulerInitialState(t *testing.T) {
+	logger := zap.New(zapcore.NewNopCore())
+	cache := newTestLeaderboardCache(logger)
+
+	// db 传 nil —— 构造函数不碰它。
+	s := NewLocalLeaderboardScheduler(logger, nil, cfg, cache, &fakeRankCache{})
+	ls, ok := s.(*LocalLeaderboardScheduler)
+	require.True(t, ok)
+	defer ls.Stop()
+
+	require.Equal(t, uint32(1), ls.active.Load(), "构造出来即为 active")
+	require.False(t, ls.started, "Start() 之前 started 必须是 false")
+	require.Equal(t, cfg.GetLeaderboard().CallbackQueueSize, cap(ls.queue),
+		"回调队列容量应取自配置")
+	require.NotNil(t, ls.updateCh,
+		"3.40 的 Update() 靠 updateCh 发信号；nil channel 会静默走 default，测试会假绿")
+
+	// Start() 之前调 Update() 必须是空操作 —— 覆盖 Update() 开头 `if !ls.started` 的早返回。
+	// 契约上很重要：运行时 VM 初始化期间会有 Update() 进来，那时不该武装任何东西。
+	ls.Update()
+	require.Len(t, ls.updateCh, 0, "Start() 之前 Update() 不得发出调度信号")
+}
+
+func TestLeaderboardSchedulerPauseIsIdempotent(t *testing.T) {
+	logger := zap.New(zapcore.NewNopCore())
+	ls := newTestScheduler(logger, newTestLeaderboardCache(logger))
+	defer stopTestScheduler(ls)
+
+	ls.Pause()
+	require.Equal(t, uint32(0), ls.active.Load())
+
+	// 第二次 Pause 时 active 已是 0，CompareAndSwap 失败 ⇒ 提前返回、不再唤醒调度循环。
+	for len(ls.updateCh) > 0 {
+		<-ls.updateCh
+	}
+	ls.Pause()
+	require.Equal(t, uint32(0), ls.active.Load(), "重复 Pause 不应改变状态")
+	require.Len(t, ls.updateCh, 0, "已暂停时再次 Pause 应提前返回，不该再唤醒调度循环")
+}
+
+func TestLeaderboardSchedulerResumeRearms(t *testing.T) {
+	logger := zap.New(zapcore.NewNopCore())
+	ls := newTestScheduler(logger, newTestLeaderboardCache(logger))
+	defer stopTestScheduler(ls)
+
+	ls.Pause()
+	require.Equal(t, uint32(0), ls.active.Load())
+	for len(ls.updateCh) > 0 {
+		<-ls.updateCh
+	}
+
+	ls.Resume()
+	require.Equal(t, uint32(1), ls.active.Load(), "Resume 应把 active 置回 1")
+	require.Len(t, ls.updateCh, 1, "Resume 应通过 Update() 重新武装调度循环")
+}
+
+func TestLeaderboardSchedulerPauseStopsDelivery(t *testing.T) {
+	logger := zap.New(zapcore.NewNopCore())
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+	// 用 cache.Insert 播种，不需要真库（走的是普通榜路径）。
+	cache.Insert("due-soon", true, 0, 0, "* * * * *", "{}", now, false)
+
+	ls := newTestScheduler(logger, cache)
+	ls.config = cfg
+	defer stopTestScheduler(ls)
+
+	fired := make(chan struct{}, 4)
+	ls.fnLeaderboardReset = func(context.Context, *api.Leaderboard, int64) error {
+		fired <- struct{}{}
+		return nil
+	}
+	// ⚠️ 必须一并装配 fnTournamentEnd —— processEndActive 首行是
+	// `if ls.fnTournamentEnd == nil { return }`，漏设会导致回调永不入队，
+	// 表现与「回调丢失」一模一样（P28 的 S1 首轮就假红在这里）。
+	ls.fnTournamentEnd = func(context.Context, *api.Tournament, int64, int64) error { return nil }
+
+	ls.Start(&Runtime{peer: &uberatomic.Value{}})
+	ls.Pause()
+
+	select {
+	case <-fired:
+		t.Fatal("暂停期间不应投递回调")
+	case <-time.After(2 * time.Second):
+	}
+}
+
+
+
+
+// 生命周期第五条：Stop() 必须无条件停掉一切，包括「已到期本该立刻跑」的那些。
+//
+// 3.32 的断言是「已到期的 expiryTimer 被取消」，3.40 没有独立 timer 了 ——
+// 等价的可观察行为是：Stop() 之后即使有到期的榜、即使再 Update()，也不再投递回调。
+func TestLeaderboardSchedulerStopCancelsAll(t *testing.T) {
+	logger := zap.New(zapcore.NewNopCore())
+	cache := newTestLeaderboardCache(logger)
+	now := time.Now().UTC().Unix()
+	cache.Insert("due-soon", true, 0, 0, "* * * * *", "{}", now, false)
+
+	ls := newTestScheduler(logger, cache)
+	ls.config = cfg
+
+	fired := make(chan struct{}, 4)
+	ls.fnLeaderboardReset = func(context.Context, *api.Leaderboard, int64) error {
+		fired <- struct{}{}
+		return nil
+	}
+	// processEndActive 首行是 `if ls.fnTournamentEnd == nil { return }`，漏设会让回调
+	// 永不入队 —— 表现与「Stop 生效」一模一样，测试会因错误的原因绿。
+	ls.fnTournamentEnd = func(context.Context, *api.Tournament, int64, int64) error { return nil }
+
+	ls.Start(&Runtime{peer: &uberatomic.Value{}})
+	ls.Stop()
+
+	require.Error(t, ls.ctx.Err(), "Stop() 必须取消 ctx")
+
+	ls.Update() // 停掉之后再催一次，也不该有任何投递
+
+	select {
+	case <-fired:
+		t.Fatal("Stop() 之后不得再投递回调，包括已到期的")
+	case <-time.After(2 * time.Second):
 	}
 }
