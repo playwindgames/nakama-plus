@@ -18,10 +18,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -60,7 +59,8 @@ func (s *ApiServer) DeleteLeaderboardRecord(ctx context.Context, in *api.DeleteL
 		return nil, status.Error(codes.InvalidArgument, "Invalid leaderboard ID.")
 	}
 
-	if err := LeaderboardRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, in.LeaderboardId, userID.String()); err != nil {
+	peer, _ := s.router.GetPeer()
+	if err := LeaderboardRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, userID, in.LeaderboardId, userID.String()); err != nil {
 		switch err {
 		case ErrLeaderboardNotFound:
 			return nil, status.Error(codes.NotFound, "Leaderboard not found.")
@@ -199,10 +199,11 @@ func (s *ApiServer) WriteLeaderboardRecord(ctx context.Context, in *api.WriteLea
 		}
 	}
 
-	record, err := LeaderboardRecordWrite(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, in.LeaderboardId, userID.String(), username, in.Record.Score, in.Record.Subscore, in.Record.Metadata, in.Record.Operator)
-	if errors.Is(err, ErrLeaderboardNotFound) {
+	peer, _ := s.router.GetPeer()
+	record, err := LeaderboardRecordWrite(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, userID, in.LeaderboardId, userID.String(), username, in.Record.Score, in.Record.Subscore, in.Record.Metadata, in.Record.Operator)
+	if err == ErrLeaderboardNotFound {
 		return nil, status.Error(codes.NotFound, "Leaderboard not found.")
-	} else if errors.Is(err, ErrLeaderboardAuthoritative) {
+	} else if err == ErrLeaderboardAuthoritative {
 		return nil, status.Error(codes.PermissionDenied, "Leaderboard only allows authoritative score submissions.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error writing score to leaderboard.")
@@ -273,7 +274,7 @@ func (s *ApiServer) ListLeaderboardRecordsAroundOwner(ctx context.Context, in *a
 	}
 
 	records, err := LeaderboardRecordsHaystack(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, in.GetLeaderboardId(), in.Cursor, ownerID, limit, overrideExpiry)
-	if errors.Is(err, ErrLeaderboardNotFound) {
+	if err == ErrLeaderboardNotFound {
 		return nil, status.Error(codes.NotFound, "Leaderboard not found.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error querying records from leaderboard.")

@@ -42,8 +42,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
@@ -51,6 +49,8 @@ import (
 	"github.com/doublemo/nakama-plus/v3/internal/cronexpr"
 	lua "github.com/doublemo/nakama-plus/v3/internal/gopher-lua"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -203,7 +203,6 @@ func (n *RuntimeLuaNakamaModule) Loader(l *lua.LState) int {
 		"account_update_id":                  n.accountUpdateId,
 		"account_delete_id":                  n.accountDeleteId,
 		"account_export_id":                  n.accountExportId,
-		"account_import_id":                  n.accountImportId,
 		"users_get_id":                       n.usersGetId,
 		"users_get_username":                 n.usersGetUsername,
 		"users_get_friend_status":            n.usersGetFriendStatus,
@@ -328,6 +327,8 @@ func (n *RuntimeLuaNakamaModule) Loader(l *lua.LState) int {
 		"storage_index_list":                        n.storageIndexList,
 		"get_config":                                n.getConfig,
 		"get_satori":                                n.getSatori,
+		"get_peer":                                  n.getPeer,
+		"register_peer_event":                       n.registerEventPeer,
 	}
 
 	mod := l.SetFuncs(l.CreateTable(0, len(functions)), functions)
@@ -768,8 +769,31 @@ func (n *RuntimeLuaNakamaModule) localcacheGet(l *lua.LState) int {
 	}
 
 	defaultValue := l.Get(2)
+	var (
+		value  lua.LValue
+		found  bool
+		cacher *PeerCacher
+	)
 
-	value, found := n.localCache.Get(key)
+	direction := ParseCacheDirection(l.OptString(3, ""))
+	peer, ok := n.router.GetPeer()
+	if ok {
+		cacher = peer.GetCacher()
+	}
+
+	if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+		value, found = n.localCache.Get(key)
+	} else {
+		opts := make([]runtime.PeerCacheOption, 0)
+		if direction == CacheDirectionMemoryOnly {
+			opts = append(opts, runtime.WithMemoryOnly(true))
+		}
+
+		if v, err := cacher.Get(key, opts...); err == nil {
+			value = RuntimeLuaConvertValue(l, v)
+			found = true
+		}
+	}
 
 	if found {
 		l.Push(value)
@@ -797,8 +821,54 @@ func (n *RuntimeLuaNakamaModule) localcachePut(l *lua.LState) int {
 		return 0
 	}
 
-	n.localCache.Put(key, value, ttl)
+	var (
+		cacher    *PeerCacher
+		direction CacheDirection
+	)
+	peer, ok := n.router.GetPeer()
+	if ok {
+		cacher = peer.GetCacher()
+	}
 
+	opts := make(map[string]interface{})
+	if m := l.OptTable(4, nil); m != nil {
+		opts = RuntimeLuaConvertLuaTable(m)
+	}
+
+	if v, ok := opts["direction"]; ok {
+		if m, ok := v.(string); ok {
+			direction = ParseCacheDirection(m)
+		}
+	}
+
+	if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+		n.localCache.Put(key, value, ttl)
+		return 0
+	}
+
+	storeOpts := make([]runtime.PeerCacheOption, 0)
+	if direction == CacheDirectionMemoryOnly {
+		storeOpts = append(storeOpts, runtime.WithMemoryOnly(true))
+	}
+
+	if v, ok := opts["tags"]; ok {
+		m, ok := v.([]interface{})
+		if ok {
+			tags := make([]string, len(m))
+			for k, vv := range m {
+				tags[k] = fmt.Sprint(vv)
+			}
+			storeOpts = append(storeOpts, runtime.WithTags(tags))
+		}
+	}
+
+	if ttl > 0 {
+		storeOpts = append(storeOpts, runtime.WithExpiration(time.Second*time.Duration(ttl)))
+	}
+
+	if err := cacher.Set(key, RuntimeLuaConvertLuaValue(value), storeOpts...); err != nil {
+		l.ArgError(4, err.Error())
+	}
 	return 0
 }
 
@@ -809,14 +879,65 @@ func (n *RuntimeLuaNakamaModule) localcacheDelete(l *lua.LState) int {
 		return 0
 	}
 
-	n.localCache.Delete(key)
+	var (
+		cacher    *PeerCacher
+		direction CacheDirection
+	)
+	peer, ok := n.router.GetPeer()
+	if ok {
+		cacher = peer.GetCacher()
+	}
 
+	opts := make(map[string]interface{})
+	if m := l.OptTable(2, nil); m != nil {
+		opts = RuntimeLuaConvertLuaTable(m)
+	}
+
+	if v, ok := opts["direction"]; ok {
+		if m, ok := v.(string); ok {
+			direction = ParseCacheDirection(m)
+		}
+	}
+
+	if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+		n.localCache.Delete(key)
+		return 0
+	}
+
+	if v, ok := opts["tags"]; ok {
+		m, ok := v.([]interface{})
+		if ok {
+			tags := make([]string, len(m))
+			for k, vv := range m {
+				tags[k] = fmt.Sprint(vv)
+			}
+
+			if err := cacher.Invalidate(tags...); err != nil {
+				l.ArgError(2, err.Error())
+			}
+			return 0
+		}
+	}
+
+	if err := cacher.Delete(key); err != nil {
+		l.ArgError(2, err.Error())
+	}
 	return 0
 }
 
-func (n *RuntimeLuaNakamaModule) localcacheClear(_ *lua.LState) int {
-	n.localCache.Clear()
+func (n *RuntimeLuaNakamaModule) localcacheClear(l *lua.LState) int {
+	var cacher *PeerCacher
+	direction := ParseCacheDirection(l.OptString(1, ""))
+	peer, ok := n.router.GetPeer()
+	if ok {
+		cacher = peer.GetCacher()
+	}
 
+	if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+		n.localCache.Clear()
+	} else {
+		cacher.Clear()
+	}
 	return 0
 }
 
@@ -7554,9 +7675,13 @@ func (n *RuntimeLuaNakamaModule) leaderboardCreate(l *lua.LState) int {
 
 	enableRanks := l.OptBool(7, false)
 
-	_, created, err := n.leaderboardCache.Create(l.Context(), leaderboardID, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, enableRanks)
+	leaderboard, created, err := n.leaderboardCache.Create(l.Context(), leaderboardID, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, enableRanks)
 	if err != nil {
 		l.RaiseError("error creating leaderboard: %v", err.Error())
+	}
+
+	if peer, ok := n.router.GetPeer(); ok {
+		peer.LeaderboardCreate(leaderboard, created)
 	}
 
 	if created {
@@ -7581,6 +7706,10 @@ func (n *RuntimeLuaNakamaModule) leaderboardDelete(l *lua.LState) int {
 	_, err := n.leaderboardCache.Delete(l.Context(), n.rankCache, n.leaderboardScheduler, id)
 	if err != nil {
 		l.RaiseError("error deleting leaderboard: %v", err.Error())
+	}
+
+	if peer, ok := n.router.GetPeer(); ok {
+		peer.LeaderboardRemove(id)
 	}
 
 	return 0
@@ -7652,6 +7781,12 @@ func (n *RuntimeLuaNakamaModule) leaderboardRanksDisable(l *lua.LState) int {
 
 	if err := disableLeaderboardRanks(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, id); err != nil {
 		l.RaiseError("error disabling leaderboard ranks: %s", err.Error())
+	}
+
+	if peer, ok := n.router.GetPeer(); ok {
+		if l := n.leaderboardCache.Get(id); l != nil {
+			peer.LeaderboardInsert(l.Id, l.Authoritative, l.SortOrder, l.Operator, l.ResetScheduleStr, l.Metadata, l.CreateTime, false)
+		}
 	}
 
 	return 0
@@ -7867,7 +8002,8 @@ func (n *RuntimeLuaNakamaModule) leaderboardRecordWrite(l *lua.LState) int {
 		}
 	}
 
-	record, err := LeaderboardRecordWrite(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, overrideOperator)
+	peer, _ := n.router.GetPeer()
+	record, err := LeaderboardRecordWrite(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, overrideOperator)
 	if err != nil {
 		l.RaiseError("error writing leaderboard record: %v", err.Error())
 		return 0
@@ -7948,7 +8084,8 @@ func (n *RuntimeLuaNakamaModule) leaderboardRecordDelete(l *lua.LState) int {
 		return 0
 	}
 
-	if err := LeaderboardRecordDelete(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID); err != nil {
+	peer, _ := n.router.GetPeer()
+	if err := LeaderboardRecordDelete(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID); err != nil {
 		l.RaiseError("error deleting leaderboard record: %v", err.Error())
 	}
 	return 0
@@ -8627,9 +8764,13 @@ func (n *RuntimeLuaNakamaModule) tournamentCreate(l *lua.LState) int {
 	}
 	joinRequired := l.OptBool(15, false)
 	enableRanks := l.OptBool(16, false)
-
-	if err := TournamentCreate(l.Context(), n.logger, n.leaderboardCache, n.leaderboardScheduler, id, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, title, description, category, startTime, endTime, duration, maxSize, maxNumScore, joinRequired, enableRanks); err != nil {
+	created, err := TournamentCreate(l.Context(), n.logger, n.leaderboardCache, n.leaderboardScheduler, id, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, title, description, category, startTime, endTime, duration, maxSize, maxNumScore, joinRequired, enableRanks)
+	if err != nil {
 		l.RaiseError("error creating tournament: %v", err.Error())
+	}
+
+	if peer, ok := n.router.GetPeer(); ok {
+		peer.LeaderboardCreateTournament(n.leaderboardCache.Get(id), created)
 	}
 	return 0
 }
@@ -8648,6 +8789,11 @@ func (n *RuntimeLuaNakamaModule) tournamentDelete(l *lua.LState) int {
 	if err := TournamentDelete(l.Context(), n.leaderboardCache, n.rankCache, n.leaderboardScheduler, id); err != nil {
 		l.RaiseError("error deleting tournament: %v", err.Error())
 	}
+
+	if peer, ok := n.router.GetPeer(); ok {
+		peer.LeaderboardRemove(id)
+	}
+
 	return 0
 }
 
@@ -8715,7 +8861,8 @@ func (n *RuntimeLuaNakamaModule) tournamentJoin(l *lua.LState) int {
 		return 0
 	}
 
-	if err := TournamentJoin(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, uid, username, id); err != nil {
+	peer, _ := n.router.GetPeer()
+	if err := TournamentJoin(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uid, username, id); err != nil {
 		l.RaiseError("error joining tournament: %v", err.Error())
 	}
 	return 0
@@ -9089,6 +9236,12 @@ func (n *RuntimeLuaNakamaModule) tournamentRanksDisable(l *lua.LState) int {
 		l.RaiseError("error disabling tournament ranks: %s", err.Error())
 	}
 
+	if peer, ok := n.router.GetPeer(); ok {
+		if l := n.leaderboardCache.Get(id); l != nil {
+			peer.LeaderboardInsert(l.Id, l.Authoritative, l.SortOrder, l.Operator, l.ResetScheduleStr, l.Metadata, l.CreateTime, false)
+		}
+	}
+
 	return 0
 }
 
@@ -9141,7 +9294,8 @@ func (n *RuntimeLuaNakamaModule) tournamentRecordWrite(l *lua.LState) int {
 		return 0
 	}
 
-	record, err := TournamentRecordWrite(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, api.Operator(overrideOperator))
+	peer, _ := n.router.GetPeer()
+	record, err := TournamentRecordWrite(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, api.Operator(overrideOperator))
 	if err != nil {
 		l.RaiseError("error writing tournament record: %v", err.Error())
 		return 0
@@ -9175,7 +9329,8 @@ func (n *RuntimeLuaNakamaModule) tournamentRecordDelete(l *lua.LState) int {
 		return 0
 	}
 
-	if err := TournamentRecordDelete(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID); err != nil {
+	peer, _ := n.router.GetPeer()
+	if err := TournamentRecordDelete(l.Context(), n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID); err != nil {
 		l.RaiseError("error deleting tournament record: %v", err.Error())
 	}
 	return 0
@@ -10250,7 +10405,8 @@ func (n *RuntimeLuaNakamaModule) accountDeleteId(l *lua.LState) int {
 
 	recorded := l.OptBool(2, false)
 
-	if err := DeleteAccount(l.Context(), n.logger, n.db, n.config, n.leaderboardCache, n.rankCache, n.sessionRegistry, n.sessionCache, n.tracker, userID, recorded); err != nil {
+	peer, _ := n.router.GetPeer()
+	if err := DeleteAccount(l.Context(), n.logger, n.db, n.config, n.leaderboardCache, n.rankCache, n.sessionRegistry, n.sessionCache, n.tracker, peer, userID, recorded); err != nil {
 		l.RaiseError("error while trying to delete account: %v", err.Error())
 	}
 
@@ -11715,7 +11871,7 @@ func (n *RuntimeLuaNakamaModule) satoriPropertiesUpdate(l *lua.LState) int {
 }
 
 // @group satori
-// @summary Publish events.
+// @summary Publish an events.
 // @param identifier(type=string) The identifier of the identity.
 // @param events(type=table) An array of events to publish.
 // @param ip(type=string) Ip address.
@@ -12478,6 +12634,215 @@ func (n *RuntimeLuaNakamaModule) satoriMessageDelete(l *lua.LState) int {
 	return 0
 }
 
+// @group peer
+// @summary Get the peer client.
+// @return peer(table) The peer client.
+// @return error(error) An optional error value if an error occurred.
+func (n *RuntimeLuaNakamaModule) getPeer(l *lua.LState) int {
+	peerFunctions := map[string]lua.LGFunction{
+		"invoke_ms": n.peerInvokeMS,
+		"send_ms":   n.peerSendMS,
+		"event":     n.peerEvent,
+	}
+
+	peerMod := l.SetFuncs(l.CreateTable(0, len(peerFunctions)), peerFunctions)
+	l.Push(peerMod)
+	return 1
+}
+
+func (n *RuntimeLuaNakamaModule) peerInvokeMS(l *lua.LState) int {
+	cid := l.CheckString(1)
+	name := l.CheckString(2)
+	header := l.OptTable(3, nil)
+	query := l.OptTable(4, nil)
+	ctx := l.OptTable(5, nil)
+	content := l.CheckString(6)
+
+	req := &api.AnyRequest{
+		Cid:     cid,
+		Name:    name,
+		Header:  make(map[string]string),
+		Query:   make(map[string]*api.AnyQuery),
+		Context: make(map[string]string),
+		Body: &api.AnyRequest_StringContent{
+			StringContent: content,
+		},
+	}
+
+	if header != nil {
+		headerMap, err := RuntimeLuaConvertLuaTableString(header)
+		if err == nil {
+			req.Header = headerMap
+		}
+	}
+
+	if query != nil {
+		for k, v := range RuntimeLuaConvertLuaTable(query) {
+			if vv, ok := v.([]string); ok {
+				req.Query[k] = &api.AnyQuery{Value: vv}
+			}
+		}
+	}
+
+	if ctx != nil {
+		ctxMap, err := RuntimeLuaConvertLuaTableString(ctx)
+		if err == nil {
+			req.Context = ctxMap
+		}
+	}
+
+	peer, ok := n.router.GetPeer()
+	if !ok {
+		l.RaiseError("Service Unavailable")
+		return 0
+	}
+
+	resp, err := peer.InvokeMS(context.Background(), req)
+	if err != nil {
+		l.RaiseError("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err)
+		return 0
+	}
+
+	respTable := l.CreateTable(0, 2)
+	respTable.RawSetString("header", RuntimeLuaConvertMapString(l, resp.GetHeader()))
+	respTable.RawSetString("body", lua.LString(resp.GetStringContent()))
+	l.Push(respTable)
+	return 1
+}
+
+func (n *RuntimeLuaNakamaModule) peerSendMS(l *lua.LState) int {
+	cid := l.CheckString(1)
+	name := l.CheckString(2)
+	header := l.OptTable(3, nil)
+	query := l.OptTable(4, nil)
+	ctx := l.OptTable(5, nil)
+	content := l.CheckString(6)
+
+	req := &api.AnyRequest{
+		Cid:     cid,
+		Name:    name,
+		Header:  make(map[string]string),
+		Query:   make(map[string]*api.AnyQuery),
+		Context: make(map[string]string),
+		Body: &api.AnyRequest_StringContent{
+			StringContent: content,
+		},
+	}
+
+	if header != nil {
+		headerMap, err := RuntimeLuaConvertLuaTableString(header)
+		if err == nil {
+			req.Header = headerMap
+		}
+	}
+
+	if query != nil {
+		for k, v := range RuntimeLuaConvertLuaTable(query) {
+			if vv, ok := v.([]string); ok {
+				req.Query[k] = &api.AnyQuery{Value: vv}
+			}
+		}
+	}
+
+	if ctx != nil {
+		ctxMap, err := RuntimeLuaConvertLuaTableString(ctx)
+		if err == nil {
+			req.Context = ctxMap
+		}
+	}
+
+	peer, ok := n.router.GetPeer()
+	if !ok {
+		l.RaiseError("Service Unavailable")
+		return 0
+	}
+
+	err := peer.SendMS(context.Background(), req)
+	if err != nil {
+		l.RaiseError("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err)
+		return 0
+	}
+	return 1
+}
+
+func (n *RuntimeLuaNakamaModule) peerEvent(l *lua.LState) int {
+	cid := l.CheckString(1)
+	name := l.CheckString(2)
+	header := l.OptTable(3, nil)
+	query := l.OptTable(4, nil)
+	ctx := l.OptTable(5, nil)
+	content := l.CheckString(6)
+	clients := l.OptTable(7, nil)
+
+	req := &api.AnyRequest{
+		Cid:     cid,
+		Name:    name,
+		Header:  make(map[string]string),
+		Query:   make(map[string]*api.AnyQuery),
+		Context: make(map[string]string),
+		Body: &api.AnyRequest_StringContent{
+			StringContent: content,
+		},
+	}
+
+	if header != nil {
+		headerMap, err := RuntimeLuaConvertLuaTableString(header)
+		if err == nil {
+			req.Header = headerMap
+		}
+	}
+
+	if query != nil {
+		for k, v := range RuntimeLuaConvertLuaTable(query) {
+			if vv, ok := v.([]string); ok {
+				req.Query[k] = &api.AnyQuery{Value: vv}
+			}
+		}
+	}
+
+	if ctx != nil {
+		ctxMap, err := RuntimeLuaConvertLuaTableString(ctx)
+		if err == nil {
+			req.Context = ctxMap
+		}
+	}
+
+	names := make([]string, 0)
+	if clients != nil {
+		values, ok := RuntimeLuaConvertLuaValue(clients).([]interface{})
+		if ok {
+			for _, value := range values {
+				names = append(names, toString(value))
+			}
+		}
+	}
+
+	peer, ok := n.router.GetPeer()
+	if !ok {
+		l.RaiseError("Service Unavailable")
+		return 0
+	}
+
+	err := peer.Event(context.Background(), req, names...)
+	if err != nil {
+		l.RaiseError("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err)
+		return 0
+	}
+	return 1
+}
+
+func (n *RuntimeLuaNakamaModule) registerEventPeer(l *lua.LState) int {
+	fn := l.CheckFunction(1)
+
+	if n.registerCallbackFn != nil {
+		n.registerCallbackFn(RuntimeExecutionModePeerEvent, "", fn)
+	}
+	if n.announceCallbackFn != nil {
+		n.announceCallbackFn(RuntimeExecutionModePeerEvent, "")
+	}
+	return 0
+}
+
 func RuntimeLuaConvertLuaTableString(vars *lua.LTable) (map[string]string, error) {
 	varsMap := make(map[string]string)
 	if vars != nil {
@@ -12504,4 +12869,30 @@ func RuntimeLuaConvertLuaTableString(vars *lua.LTable) (map[string]string, error
 		}
 	}
 	return varsMap, nil
+}
+
+func anyRequestToLuaTable(l *lua.LState, p *api.AnyRequest) *lua.LTable {
+	anyRequestTable := l.CreateTable(0, 6)
+	anyRequestTable.RawSetString("cid", lua.LString(p.GetCid()))
+	anyRequestTable.RawSetString("name", lua.LString(p.GetName()))
+
+	headerMap := make(map[string]interface{}, len(p.GetHeader()))
+	for k, v := range p.GetHeader() {
+		headerMap[k] = v
+	}
+	anyRequestTable.RawSetString("header", RuntimeLuaConvertMap(l, headerMap))
+
+	queryMap := make(map[string]interface{}, len(p.GetQuery()))
+	for k, v := range p.GetQuery() {
+		queryMap[k] = v
+	}
+	anyRequestTable.RawSetString("query", RuntimeLuaConvertMap(l, queryMap))
+
+	contextMap := make(map[string]interface{}, len(p.GetContext()))
+	for k, v := range p.GetContext() {
+		contextMap[k] = v
+	}
+	anyRequestTable.RawSetString("context", RuntimeLuaConvertMap(l, contextMap))
+	anyRequestTable.RawSetString("body", lua.LString(p.GetStringContent()))
+	return anyRequestTable
 }

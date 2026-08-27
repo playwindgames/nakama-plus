@@ -19,8 +19,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 )
 
@@ -77,7 +77,7 @@ func (p *Pipeline) partyCreate(ctx context.Context, logger *zap.Logger, session 
 
 	if p.config.GetSession().SingleParty {
 		// Kick the user from any other parties they may be part of.
-		p.tracker.UntrackLocalByModes(session.ID(), partyStreamMode, ph.Stream)
+		p.tracker.UntrackByModes(session.ID(), partyStreamMode, ph.Stream)
 	}
 
 	out := &rtapi.Envelope{Cid: envelope.Cid, Message: &rtapi.Envelope_Party{Party: &rtapi.Party{
@@ -156,7 +156,7 @@ func (p *Pipeline) partyJoin(ctx context.Context, logger *zap.Logger, session Se
 
 		if p.config.GetSession().SingleParty {
 			// Kick the user from any other parties they may be part of.
-			p.tracker.UntrackLocalByModes(session.ID(), partyStreamMode, stream)
+			p.tracker.UntrackByModes(session.ID(), partyStreamMode, stream)
 		}
 	}
 
@@ -524,7 +524,7 @@ func (p *Pipeline) partyMatchmakerAdd(ctx context.Context, logger *zap.Logger, s
 	return true, out
 }
 
-func (p *Pipeline) partyMatchmakerRemove(ctx context.Context, logger *zap.Logger, session Session, envelope *rtapi.Envelope) (bool, *rtapi.Envelope) {
+func (p *Pipeline) partyMatchmakerRemove(ctx context.Context, ogger *zap.Logger, session Session, envelope *rtapi.Envelope) (bool, *rtapi.Envelope) {
 	incoming := envelope.GetPartyMatchmakerRemove()
 
 	// Ticket is required.

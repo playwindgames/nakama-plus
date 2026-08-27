@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -142,6 +142,8 @@ func (p *Pipeline) ProcessRequest(logger *zap.Logger, session Session, in *rtapi
 		pipelineFn = p.partyDataSend
 	case *rtapi.Envelope_PartyUpdate:
 		pipelineFn = p.partyUpdate
+	case *rtapi.Envelope_AnyRequest:
+		pipelineFn = p.any
 	default:
 		// If we reached this point the envelope was valid but the contents are missing or unknown.
 		// Usually caused by a version mismatch, and should cause the session making this pipeline request to close.
@@ -157,7 +159,7 @@ func (p *Pipeline) ProcessRequest(logger *zap.Logger, session Session, in *rtapi
 
 	switch in.Message.(type) {
 	case *rtapi.Envelope_Rpc:
-		// No before/after hooks on RPC. RPC handles its own metrics in pipeline_rpc.go.
+		// No before/after hooks on RPC/Any. RPC handles its own metrics in pipeline_rpc.go.
 	default:
 		messageName = fmt.Sprintf("%T", in.Message)
 		messageNameID = strings.ToLower(messageName)

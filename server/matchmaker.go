@@ -21,11 +21,11 @@ import (
 	"time"
 
 	"github.com/blugelabs/bluge"
-	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -185,7 +185,7 @@ type Matchmaker interface {
 	RemoveSessionAll(sessionID string) error
 	RemoveParty(partyID, ticket string) error
 	RemovePartyAll(partyID string) error
-	RemoveAll(node string)
+	RemoveAll(nodes map[string]bool)
 	Remove(tickets []string)
 	GetStats() *api.MatchmakerStats
 	SetStats(*api.MatchmakerStats)
@@ -312,6 +312,7 @@ func NewLocalMatchmaker(logger, startupLogger *zap.Logger, config Config, router
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(config.GetMatchmaker().IntervalSec) * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -447,7 +448,6 @@ func (m *LocalMatchmaker) Process() {
 			}
 			delete(m.indexes, entry.Ticket)
 			delete(m.activeIndexes, entry.Ticket)
-
 			if m.runtime.matchmakerProcessorFunction == nil {
 				// Rev cache not used when custom matchmaking processor is registered.
 				m.revCache.Delete(entry.Ticket)
@@ -683,7 +683,6 @@ func (m *LocalMatchmaker) Add(ctx context.Context, presences []*MatchmakerPresen
 	}
 
 	m.Unlock()
-
 	return ticket, createdAt, nil
 }
 
@@ -902,7 +901,6 @@ func (m *LocalMatchmaker) RemoveSession(sessionID, ticket string) error {
 	}
 
 	m.Unlock()
-
 	return nil
 }
 
@@ -934,7 +932,6 @@ func (m *LocalMatchmaker) RemoveSessionAll(sessionID string) error {
 		delete(m.indexes, ticket)
 
 		delete(m.activeIndexes, ticket)
-
 		if m.runtime.matchmakerProcessorFunction == nil {
 			// Rev cache not used when custom matchmaking processor is registered.
 			m.revCache.Delete(ticket)
@@ -976,7 +973,6 @@ func (m *LocalMatchmaker) RemoveSessionAll(sessionID string) error {
 	} else {
 		m.Unlock()
 	}
-
 	return nil
 }
 
@@ -1010,7 +1006,6 @@ func (m *LocalMatchmaker) RemoveParty(partyID, ticket string) error {
 	}
 
 	delete(m.activeIndexes, ticket)
-
 	if m.runtime.matchmakerProcessorFunction == nil {
 		// Rev cache and index not used when custom matchmaking processor is registered.
 		m.revCache.Delete(ticket)
@@ -1023,7 +1018,6 @@ func (m *LocalMatchmaker) RemoveParty(partyID, ticket string) error {
 	}
 
 	m.Unlock()
-
 	return nil
 }
 
@@ -1083,18 +1077,17 @@ func (m *LocalMatchmaker) RemovePartyAll(partyID string) error {
 	} else {
 		m.Unlock()
 	}
-
 	return nil
 }
 
-func (m *LocalMatchmaker) RemoveAll(node string) {
+func (m *LocalMatchmaker) RemoveAll(nodes map[string]bool) {
 	batch := bluge.NewBatch()
 
 	m.Lock()
 
 	var removedCount uint32
 	for ticket, index := range m.indexes {
-		if index.Node != node {
+		if !nodes[index.Node] {
 			continue
 		}
 
@@ -1107,7 +1100,6 @@ func (m *LocalMatchmaker) RemoveAll(node string) {
 		delete(m.indexes, ticket)
 
 		delete(m.activeIndexes, ticket)
-
 		if m.runtime.matchmakerProcessorFunction == nil {
 			// Rev cache not used when custom matchmaking processor is registered.
 			m.revCache.Delete(ticket)
@@ -1173,7 +1165,6 @@ func (m *LocalMatchmaker) Remove(tickets []string) {
 		delete(m.indexes, ticket)
 
 		delete(m.activeIndexes, ticket)
-
 		if m.runtime.matchmakerProcessorFunction == nil {
 			// Rev cache not used when custom matchmaking processor is registered.
 			m.revCache.Delete(ticket)

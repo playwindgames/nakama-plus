@@ -28,14 +28,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/doublemo/nakama-common/runtime"
-
 	"github.com/dop251/goja"
 	"github.com/dop251/goja/ast"
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/runtime"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -106,6 +105,8 @@ func (r *RuntimeJS) GetCallback(e RuntimeExecutionMode, key string) string {
 			return ""
 		}
 		return fnId
+	case RuntimeExecutionModePeerEvent:
+		return r.callbacks.EventPeer
 	}
 
 	return ""
@@ -650,7 +651,7 @@ func (rp *RuntimeProviderJS) Put(r *RuntimeJS) {
 	}
 }
 
-func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, partyRegistry PartyRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, satoriClient runtime.Satori, eventFn RuntimeEventCustomFunction, path, entrypoint string, matchProvider *MatchProvider, storageIndex StorageIndex) ([]string, map[string]RuntimeRpcFunction, map[string]RuntimeBeforeRtFunction, map[string]RuntimeAfterRtFunction, *RuntimeBeforeReqFunctions, *RuntimeAfterReqFunctions, RuntimeMatchmakerMatchedFunction, RuntimeTournamentEndFunction, RuntimeTournamentResetFunction, RuntimeLeaderboardResetFunction, RuntimeShutdownFunction, RuntimePurchaseNotificationAppleFunction, RuntimeSubscriptionNotificationAppleFunction, RuntimePurchaseNotificationGoogleFunction, RuntimeSubscriptionNotificationGoogleFunction, map[string]RuntimeStorageIndexFilterFunction, error) {
+func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, partyRegistry PartyRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, satoriClient runtime.Satori, eventFn RuntimeEventCustomFunction, path, entrypoint string, matchProvider *MatchProvider, storageIndex StorageIndex) ([]string, map[string]RuntimeRpcFunction, map[string]RuntimeBeforeRtFunction, map[string]RuntimeAfterRtFunction, *RuntimeBeforeReqFunctions, *RuntimeAfterReqFunctions, RuntimeMatchmakerMatchedFunction, RuntimeTournamentEndFunction, RuntimeTournamentResetFunction, RuntimeLeaderboardResetFunction, RuntimeShutdownFunction, RuntimePurchaseNotificationAppleFunction, RuntimeSubscriptionNotificationAppleFunction, RuntimePurchaseNotificationGoogleFunction, RuntimeSubscriptionNotificationGoogleFunction, map[string]RuntimeStorageIndexFilterFunction, RuntimeEventPeerFunction, error) {
 	startupLogger.Info("Initialising JavaScript runtime provider", zap.String("path", path), zap.String("entrypoint", entrypoint))
 
 	modCache, err := cacheJavascriptModules(startupLogger, path, entrypoint)
@@ -709,6 +710,7 @@ func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger
 	var subscriptionNotificationAppleFunction RuntimeSubscriptionNotificationAppleFunction
 	var purchaseNotificationGoogleFunction RuntimePurchaseNotificationGoogleFunction
 	var subscriptionNotificationGoogleFunction RuntimeSubscriptionNotificationGoogleFunction
+	var eventPeerFunction RuntimeEventPeerFunction
 	storageIndexFilterFunctions := make(map[string]RuntimeStorageIndexFilterFunction, 0)
 
 	matchHandlers := &RuntimeJavascriptMatchHandlers{
@@ -1363,6 +1365,14 @@ func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger
 						}
 						return result.(*api.Event), nil, 0
 					}
+				case "any":
+					beforeReqFunctions.beforeAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.AnyRequest) (*api.AnyRequest, error, codes.Code) {
+						result, err, code := runtimeProviderJS.BeforeReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, in)
+						if result == nil || err != nil {
+							return nil, err, code
+						}
+						return result.(*api.AnyRequest), nil, 0
+					}
 				}
 			}
 		case RuntimeExecutionModeAfter:
@@ -1685,6 +1695,10 @@ func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger
 					afterReqFunctions.afterEventFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.Event) error {
 						return runtimeProviderJS.AfterReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, nil, in)
 					}
+				case "any":
+					afterReqFunctions.afterAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.AnyResponseWriter, in *api.AnyRequest) error {
+						return runtimeProviderJS.AfterReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, out, in)
+					}
 				}
 			}
 		case RuntimeExecutionModeMatchmaker:
@@ -1743,11 +1757,15 @@ func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger
 			storageIndexFilterFunctions[id] = func(ctx context.Context, write *StorageOpWrite) (bool, error) {
 				return runtimeProviderJS.StorageIndexFilter(ctx, id, write)
 			}
+		case RuntimeExecutionModePeerEvent:
+			eventPeerFunction = func(ctx context.Context, logger runtime.Logger, in *api.AnyRequest) {
+				runtimeProviderJS.EventPeer(ctx, logger, in)
+			}
 		}
 	}, false)
 	if err != nil {
 		logger.Error("Failed to eval JavaScript modules.", zap.Error(err))
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 
 	runtimeProviderJS.newFn = func() *RuntimeJS {
@@ -1797,7 +1815,7 @@ func NewRuntimeProviderJS(ctx context.Context, logger, startupLogger *zap.Logger
 	}
 	startupLogger.Info("Allocated minimum JavaScript runtime pool")
 
-	return modCache.Names, rpcFunctions, beforeRtFunctions, afterRtFunctions, beforeReqFunctions, afterReqFunctions, matchmakerMatchedFunction, tournamentEndFunction, tournamentResetFunction, leaderboardResetFunction, shutdownFunction, purchaseNotificationAppleFunction, subscriptionNotificationAppleFunction, purchaseNotificationGoogleFunction, subscriptionNotificationGoogleFunction, storageIndexFilterFunctions, nil
+	return modCache.Names, rpcFunctions, beforeRtFunctions, afterRtFunctions, beforeReqFunctions, afterReqFunctions, matchmakerMatchedFunction, tournamentEndFunction, tournamentResetFunction, leaderboardResetFunction, shutdownFunction, purchaseNotificationAppleFunction, subscriptionNotificationAppleFunction, purchaseNotificationGoogleFunction, subscriptionNotificationGoogleFunction, storageIndexFilterFunctions, eventPeerFunction, nil
 }
 
 func CheckRuntimeProviderJavascript(logger *zap.Logger, config Config, version string) error {
@@ -2442,6 +2460,48 @@ func (rp *RuntimeProviderJS) StorageIndexFilter(ctx context.Context, indexName s
 	}
 
 	return filterResult, nil
+}
+
+func (rp *RuntimeProviderJS) EventPeer(ctx context.Context, logger runtime.Logger, in *api.AnyRequest) error {
+	r, err := rp.Get(ctx)
+	if err != nil {
+		return err
+	}
+	jsFn := r.GetCallback(RuntimeExecutionModePeerEvent, "")
+	if jsFn == "" {
+		rp.Put(r)
+		return errors.New("Runtime peer event function not found.")
+	}
+
+	anyRequestMap := anyRequestToJsObject(in)
+	fn, ok := goja.AssertFunction(r.vm.Get(jsFn))
+	if !ok {
+		rp.Put(r)
+		rp.logger.Error("JavaScript runtime function invalid.", zap.String("key", jsFn), zap.Error(err))
+		return errors.New("Could not run peer event hook.")
+	}
+
+	jsLogger, err := NewJsLogger(ctx, r.vm, r.logger, zap.String("mode", RuntimeExecutionModeStorageIndexFilter.String()))
+	if err != nil {
+		rp.Put(r)
+		rp.logger.Error("Could not instantiate js logger.", zap.Error(err))
+		return errors.New("Could not run peer event hook.")
+	}
+
+	ctx = NewRuntimeGoContext(ctx, r.node, r.version, r.envMap, RuntimeExecutionModePeerEvent, nil, nil, "", 0, "", "", nil, "", "", "", "")
+	r.SetContext(ctx)
+	retValue, err, _ := r.InvokeFunction(RuntimeExecutionModePeerEvent, "eventPeer", fn, jsLogger, nil, nil, "", "", "", nil, 0, "", "", "", "", r.vm.ToValue(anyRequestMap))
+	r.SetContext(context.Background())
+	rp.Put(r)
+	if err != nil {
+		return fmt.Errorf("Error running runtime peer event hook: %v", err.Error())
+	}
+
+	if retValue == nil {
+		return nil
+	}
+
+	return errors.New("Unexpected return type from runtime peer event hook, must be nil.")
 }
 
 func evalRuntimeModules(rp *RuntimeProviderJS, modCache *RuntimeJSModuleCache, matchHandlers *RuntimeJavascriptMatchHandlers, matchProvider *MatchProvider, leaderboardScheduler LeaderboardScheduler, storageIndex StorageIndex, localCache *RuntimeJavascriptLocalCache, announceCallbackFn func(RuntimeExecutionMode, string), dryRun bool) (*RuntimeJavascriptCallbacks, error) {

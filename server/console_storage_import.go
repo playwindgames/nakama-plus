@@ -27,9 +27,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-plus/v3/console/acl"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -46,6 +46,7 @@ type importStorageObject struct {
 func (s *ConsoleServer) importStorage(w http.ResponseWriter, r *http.Request) {
 	logger, _ := LoggerWithTraceId(context.WithValue(r.Context(), ctxTraceId{}, uuid.Must(uuid.NewV4()).String()), s.logger)
 	// Check authentication.
+
 	auth := r.Header.Get("authorization")
 	if len(auth) == 0 {
 		w.WriteHeader(401)

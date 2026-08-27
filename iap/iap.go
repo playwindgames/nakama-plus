@@ -34,8 +34,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const AppleRootPEM = `

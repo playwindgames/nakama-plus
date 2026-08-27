@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/doublemo/nakama-kit/pb"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -164,6 +165,10 @@ func (s *testMessageRouter) SendToPresenceIDs(_ *zap.Logger, presences []*Presen
 func (s *testMessageRouter) SendToStream(*zap.Logger, PresenceStream, *rtapi.Envelope, bool) {}
 func (s *testMessageRouter) SendDeferred(*zap.Logger, []*DeferredMessage)                    {}
 func (s *testMessageRouter) SendToAll(*zap.Logger, *rtapi.Envelope, bool)                    {}
+func (s *testMessageRouter) SetPeer(peer Peer)                                               {}
+func (s *testMessageRouter) GetPeer() (Peer, bool) {
+	return nil, false
+}
 
 // testTracker implements the Tracker interface and does nothing
 type testTracker struct{}
@@ -179,17 +184,19 @@ func (s *testTracker) Track(ctx context.Context, sessionID uuid.UUID, stream Pre
 	return true, true
 }
 
-func (s *testTracker) TrackMulti(ctx context.Context, sessionID uuid.UUID, ops []*TrackerOp, userID uuid.UUID) bool {
+func (s *testTracker) TrackMulti(ctx context.Context, sessionID uuid.UUID, ops []*TrackerOp, userID uuid.UUID, otherNode ...string) bool {
 	return true
 }
-func (s *testTracker) Untrack(sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID) {}
+func (s *testTracker) Untrack(sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID, otherNode ...string) {
+}
 func (s *testTracker) UntrackMulti(sessionID uuid.UUID, streams []*PresenceStream, userID uuid.UUID) {
 }
-func (s *testTracker) UntrackAll(sessionID uuid.UUID, reason runtime.PresenceReason) {}
+func (s *testTracker) UntrackAll(sessionID uuid.UUID, reason runtime.PresenceReason, otherNode ...string) {
+}
 
 // Update returns success true/false - will only fail if the user has no presence and allowIfFirstForSession is false,
 // otherwise is an upsert.
-func (s *testTracker) Update(ctx context.Context, sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID, meta PresenceMeta) bool {
+func (s *testTracker) Update(ctx context.Context, sessionID uuid.UUID, stream PresenceStream, userID uuid.UUID, meta PresenceMeta, otherNode ...string) bool {
 	return true
 }
 
@@ -253,7 +260,17 @@ func (s *testTracker) ListPresenceIDByStream(stream PresenceStream) []*PresenceI
 	return nil
 }
 
-func (s *testTracker) ListPresenceIDByStreams(fill map[PresenceStream][]*PresenceID) {}
+func (s *testTracker) ListPresenceIDByStreams(fill map[PresenceStream][]*PresenceID)  {}
+func (s *testTracker) Range(fn func(sessionID uuid.UUID, presences []*Presence) bool) {}
+func (s *testTracker) MergeRemoteState(node string, presences []*pb.Presence)         {}
+func (s *testTracker) ClearTrackByNode(nodes map[string]bool)                         {}
+func (s *testTracker) ClearRemoteTrack()                                              {}
+func (s *testTracker) SetPeer(peer Peer)                                              {}
+func (s *testTracker) UntrackByModes(sessionID uuid.UUID, modes map[uint8]struct{}, skipStream PresenceStream) {
+}
+func (t *testTracker) ListLocalPresenceIDByStream(stream PresenceStream) []*PresenceID {
+	return nil
+}
 
 // testSessionRegistry implements SessionRegistry interface and does nothing
 type testSessionRegistry struct{}
@@ -280,4 +297,7 @@ func (s *testSessionRegistry) SingleSession(ctx context.Context, tracker Tracker
 }
 
 func (s *testSessionRegistry) Range(fn func(session Session) bool) {
+}
+
+func (s *testSessionRegistry) SetPeer(peer Peer) {
 }

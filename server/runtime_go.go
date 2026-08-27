@@ -25,11 +25,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -79,7 +79,8 @@ type RuntimeGoInitializer struct {
 	match     map[string]func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule) (runtime.Match, error)
 	matchLock *sync.RWMutex
 
-	fmCallbackHandler runtime.FmCallbackHandler
+	fmCallbackHandler  runtime.FmCallbackHandler
+	eventPeerFunctions []RuntimeEventPeerFunction
 }
 
 // @group config
@@ -1230,6 +1231,40 @@ func (ri *RuntimeGoInitializer) RegisterAfterLeaveGroup(fn func(ctx context.Cont
 		loggerFields := map[string]interface{}{"api_id": "leavegroup", "mode": RuntimeExecutionModeAfter.String()}
 		return fn(ctx, RuntimeLoggerWithTraceId(ctx, ri.logger.WithFields(loggerFields)), ri.db, ri.nk, in)
 	}
+	return nil
+}
+
+func (ri *RuntimeGoInitializer) RegisterBeforeAny(fn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, in *api.AnyRequest) (*api.AnyRequest, error)) error {
+	ri.beforeReq.beforeAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.AnyRequest) (*api.AnyRequest, error, codes.Code) {
+		loggerFields := map[string]interface{}{"api_id": "any", "mode": RuntimeExecutionModeBefore.String(), "cid": in.GetCid(), "name": in.GetName()}
+		result, fnErr := fn(ctx, ri.logger.WithFields(loggerFields), ri.db, ri.nk, in)
+		if fnErr != nil {
+			var runtimeErr *runtime.Error
+			if errors.As(fnErr, &runtimeErr) {
+				if runtimeErr.Code <= 0 || runtimeErr.Code >= 17 {
+					// If error is present but code is invalid then default to 13 (Internal) as the error code.
+					return result, runtimeErr, codes.Internal
+				}
+				return result, runtimeErr, codes.Code(runtimeErr.Code)
+			}
+			// Not a runtime error that contains a code.
+			return result, fnErr, codes.Internal
+		}
+		return result, nil, codes.OK
+	}
+	return nil
+}
+
+func (ri *RuntimeGoInitializer) RegisterAfterAny(fn func(ctx context.Context, logger runtime.Logger, db *sql.DB, nk runtime.NakamaModule, out *api.AnyResponseWriter, in *api.AnyRequest) error) error {
+	ri.afterReq.afterAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.AnyResponseWriter, in *api.AnyRequest) error {
+		loggerFields := map[string]interface{}{"api_id": "any", "mode": RuntimeExecutionModeAfter.String(), "cid": in.GetCid(), "name": in.GetName()}
+		return fn(ctx, ri.logger.WithFields(loggerFields), ri.db, ri.nk, out, in)
+	}
+	return nil
+}
+
+func (ri *RuntimeGoInitializer) RegisterEventPeer(fn func(ctx context.Context, logger runtime.Logger, evt *api.AnyRequest)) error {
+	ri.eventPeerFunctions = append(ri.eventPeerFunctions, fn)
 	return nil
 }
 
@@ -3754,7 +3789,8 @@ func NewRuntimeProviderGo(ctx context.Context, logger, startupLogger *zap.Logger
 		match:     match,
 		matchLock: matchLock,
 
-		fmCallbackHandler: fmCallbackHandler,
+		fmCallbackHandler:  fmCallbackHandler,
+		eventPeerFunctions: make([]RuntimeEventPeerFunction, 0),
 	}
 
 	// The baseline context that will be passed to all InitModule calls.
@@ -3825,6 +3861,15 @@ func NewRuntimeProviderGo(ctx context.Context, logger, startupLogger *zap.Logger
 					fn(ctx, initializer.logger, evt)
 				}
 				cancelFn()
+			})
+		}
+	}
+	if len(initializer.eventPeerFunctions) > 0 {
+		events.eventPeerFunction = func(ctx context.Context, logger runtime.Logger, evt *api.AnyRequest) {
+			eventQueue.Queue(func() {
+				for _, fn := range initializer.eventPeerFunctions {
+					fn(ctx, initializer.logger, evt)
+				}
 			})
 		}
 	}

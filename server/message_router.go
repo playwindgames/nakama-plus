@@ -16,6 +16,8 @@ package server
 
 import (
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/doublemo/nakama-kit/pb"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
@@ -35,12 +37,15 @@ type MessageRouter interface {
 	SendToStream(*zap.Logger, PresenceStream, *rtapi.Envelope, bool)
 	SendDeferred(*zap.Logger, []*DeferredMessage)
 	SendToAll(*zap.Logger, *rtapi.Envelope, bool)
+	SetPeer(peer Peer)
+	GetPeer() (Peer, bool)
 }
 
 type LocalMessageRouter struct {
 	protojsonMarshaler *protojson.MarshalOptions
 	sessionRegistry    SessionRegistry
 	tracker            Tracker
+	peer               *atomic.Value
 }
 
 func NewLocalMessageRouter(sessionRegistry SessionRegistry, tracker Tracker, protojsonMarshaler *protojson.MarshalOptions) MessageRouter {
@@ -48,6 +53,7 @@ func NewLocalMessageRouter(sessionRegistry SessionRegistry, tracker Tracker, pro
 		protojsonMarshaler: protojsonMarshaler,
 		sessionRegistry:    sessionRegistry,
 		tracker:            tracker,
+		peer:               &atomic.Value{},
 	}
 }
 
@@ -60,10 +66,25 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 	var payloadProtobuf []byte
 	var payloadJSON []byte
 
+	toRemote := make(map[string][]*pb.Recipienter)
+	peer, peerOk := r.GetPeer()
 	for _, presenceID := range presenceIDs {
+		// group
+		if peerOk && presenceID.Node != peer.Local().Name() {
+			if _, ok := toRemote[presenceID.Node]; !ok {
+				toRemote[presenceID.Node] = make([]*pb.Recipienter, 0)
+			}
+
+			toRemote[presenceID.Node] = append(toRemote[presenceID.Node], &pb.Recipienter{
+				Action:  pb.Recipienter_SESSIONID,
+				Payload: &pb.Recipienter_Token{Token: presenceID.SessionID.String()},
+			})
+			continue
+		}
+
 		session := r.sessionRegistry.Get(presenceID.SessionID)
 		if session == nil {
-			logger.Debug("No session to route to", zap.String("sid", presenceID.SessionID.String()))
+			logger.Debug("No session to route to", zap.String("sid", presenceID.SessionID.String()), zap.Any("envelope", envelope))
 			continue
 		}
 
@@ -97,11 +118,47 @@ func (r *LocalMessageRouter) SendToPresenceIDs(logger *zap.Logger, presenceIDs [
 			logger.Error("Failed to route message", zap.String("sid", presenceID.SessionID.String()), zap.Error(err))
 		}
 	}
+
+	// send to remote
+	if !peerOk {
+		return
+	}
+
+	for remoteNode, sessions := range toRemote {
+		endpoint, ok := peer.Member(remoteNode)
+		if !ok {
+			continue
+		}
+
+		m := &pb.Peer_Envelope{
+			Cid:       "",
+			Recipient: sessions,
+			Payload:   &pb.Peer_Envelope_NkEnvelope{NkEnvelope: envelope},
+		}
+		if err := peer.Send(endpoint, m, reliable); err != nil {
+			logger.Error("Failed to route message", zap.String("node", remoteNode), zap.Error(err))
+		}
+	}
 }
 
 func (r *LocalMessageRouter) SendToStream(logger *zap.Logger, stream PresenceStream, envelope *rtapi.Envelope, reliable bool) {
-	presenceIDs := r.tracker.ListPresenceIDByStream(stream)
+	presenceIDs := r.tracker.ListLocalPresenceIDByStream(stream)
 	r.SendToPresenceIDs(logger, presenceIDs, envelope, reliable)
+
+	peer, ok := r.GetPeer()
+	if !ok {
+		return
+	}
+
+	recipient := &pb.Recipienter{
+		Action:  pb.Recipienter_STREAM,
+		Payload: &pb.Recipienter_Stream{Stream: presenceStream2PB(stream)},
+	}
+
+	peer.Broadcast(&pb.Peer_Envelope{
+		Recipient: []*pb.Recipienter{recipient},
+		Payload:   &pb.Peer_Envelope_NkEnvelope{NkEnvelope: envelope},
+	}, reliable)
 }
 
 func (r *LocalMessageRouter) SendDeferred(logger *zap.Logger, messages []*DeferredMessage) {
@@ -147,4 +204,27 @@ func (r *LocalMessageRouter) SendToAll(logger *zap.Logger, envelope *rtapi.Envel
 		}
 		return true
 	})
+
+	peer, ok := r.GetPeer()
+	if !ok {
+		return
+	}
+
+	peer.Broadcast(&pb.Peer_Envelope{
+		Recipient: make([]*pb.Recipienter, 0),
+		Payload:   &pb.Peer_Envelope_NkEnvelope{NkEnvelope: envelope},
+	}, reliable)
+}
+
+func (r *LocalMessageRouter) SetPeer(peer Peer) {
+	r.peer.Store(peer)
+}
+
+func (r *LocalMessageRouter) GetPeer() (Peer, bool) {
+	peer := r.peer.Load()
+	if peer == nil {
+		return nil, false
+	}
+
+	return peer.(Peer), true
 }

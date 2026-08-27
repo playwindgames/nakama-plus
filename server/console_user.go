@@ -17,19 +17,19 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-plus/v3/console"
 	"github.com/doublemo/nakama-plus/v3/console/acl"
+	"github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
@@ -93,7 +93,6 @@ func (s *ConsoleServer) AddUser(ctx context.Context, in *console.AddUserRequest)
 		return nil, status.Error(codes.InvalidArgument, "Not a valid email address")
 	}
 	in.Email = strings.ToLower(in.Email)
-
 	inviterUsername := ctx.Value(ctxConsoleUsernameKey{}).(string)
 	inviterEmail := ctx.Value(ctxConsoleEmailKey{}).(string)
 	payload := map[string]interface{}{
@@ -108,14 +107,16 @@ func (s *ConsoleServer) AddUser(ctx context.Context, in *console.AddUserRequest)
 	if payloadJson, err := json.Marshal(payload); err != nil {
 		logger.Debug("Failed to create newsletter request payload.", zap.Error(err))
 	} else {
-		if req, err := http.NewRequest(http.MethodPost, "https://cloud.heroiclabs.com/v1/nakama-newsletter/subscribe", bytes.NewBuffer(payloadJson)); err != nil {
-			logger.Debug("Failed to create newsletter request.", zap.Error(err))
-		} else {
-			req.Header.Set("Content-Type", "application/json")
-			if resp, err := s.httpClient.Do(req); err != nil {
-				logger.Debug("Failed to add newsletter subscription.", zap.Error(err))
+		if in.NewsletterSubscription {
+			if req, err := http.NewRequest(http.MethodPost, "https://cloud.heroiclabs.com/v1/nakama-newsletter/subscribe", bytes.NewBuffer(payloadJson)); err != nil {
+				logger.Debug("Failed to create newsletter request.", zap.Error(err))
 			} else {
-				logger.Debug("Added newsletter subscription.", zap.Int("status", resp.StatusCode))
+				req.Header.Set("Content-Type", "application/json")
+				if resp, err := s.httpClient.Do(req); err != nil {
+					logger.Debug("Failed to add newsletter subscription.", zap.Error(err))
+				} else {
+					logger.Debug("Added newsletter subscription.", zap.Int("status", resp.StatusCode))
+				}
 			}
 		}
 	}
@@ -305,7 +306,6 @@ func updateUser(ctx context.Context, logger *zap.Logger, tx *sql.Tx, in *console
 
 func (s *ConsoleServer) ResetUserPassword(ctx context.Context, in *console.Username) (*console.ResetUserResponse, error) {
 	logger, _ := LoggerWithTraceId(ctx, s.logger)
-
 	var token, email string
 
 	transaction := func(tx *sql.Tx) error {
@@ -415,7 +415,6 @@ func (s *ConsoleServer) dbListConsoleUsers(ctx context.Context, usernames []stri
 		result = append(result, user)
 	}
 	_ = rows.Close()
-
 	return result, nil
 }
 

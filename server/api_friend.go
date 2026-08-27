@@ -16,12 +16,11 @@ package server
 
 import (
 	"context"
-	"errors"
 	"strconv"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -72,7 +71,7 @@ func (s *ApiServer) ListFriends(ctx context.Context, in *api.ListFriendsRequest)
 
 	friends, err := ListFriends(ctx, logger, s.db, s.statusRegistry, userID, limit, state, in.GetCursor())
 	if err != nil {
-		if errors.Is(err, runtime.ErrFriendInvalidCursor) {
+		if err == runtime.ErrFriendInvalidCursor {
 			return nil, status.Error(codes.InvalidArgument, "Cursor is invalid.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to list friends.")
@@ -126,9 +125,9 @@ func (s *ApiServer) ListFriendsOfFriends(ctx context.Context, in *api.ListFriend
 		limit = int(in.GetLimit().Value)
 	}
 
-	friendsOfFriends, err := ListFriendsOfFriends(ctx, logger, s.db, s.statusRegistry, userID, limit, in.GetCursor())
+	friendsOfFriends, err := ListFriendsOfFriends(ctx, s.logger, s.db, s.statusRegistry, userID, limit, in.GetCursor())
 	if err != nil {
-		if errors.Is(err, runtime.ErrFriendInvalidCursor) {
+		if err == runtime.ErrFriendInvalidCursor {
 			return nil, status.Error(codes.InvalidArgument, "Cursor is invalid.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to list friends.")
@@ -200,7 +199,7 @@ func (s *ApiServer) AddFriends(ctx context.Context, in *api.AddFriendsRequest) (
 
 	userIDs, err := fetchUserID(ctx, s.db, in.GetUsernames())
 	if err != nil {
-		logger.Error("Could not fetch user IDs.", zap.Error(err), zap.Strings("usernames", in.GetUsernames()))
+		s.logger.Error("Could not fetch user IDs.", zap.Error(err), zap.Strings("usernames", in.GetUsernames()))
 		return nil, status.Error(codes.Internal, "Error while trying to add friends.")
 	}
 

@@ -20,8 +20,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 )

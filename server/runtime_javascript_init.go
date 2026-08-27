@@ -74,6 +74,7 @@ type RuntimeJavascriptCallbacks struct {
 	SubscriptionNotificationApple  string
 	PurchaseNotificationGoogle     string
 	SubscriptionNotificationGoogle string
+	EventPeer                      string
 }
 
 type RuntimeJavascriptInitModule struct {
@@ -280,6 +281,9 @@ func (im *RuntimeJavascriptInitModule) mappings(r *goja.Runtime) map[string]func
 		"registerAfterEvent":                              im.registerAfterEvent(r),
 		"registerStorageIndex":                            im.registerStorageIndex(r),
 		"registerStorageIndexFilter":                      im.registerStorageIndexFilter(r),
+		"registerBeforeAny":                               im.registerBeforeAny(r),
+		"registerAfterAny":                                im.registerAfterAny(r),
+		"registerPeerEvent":                               im.registerPeerEvent(r),
 	}
 }
 
@@ -1162,6 +1166,18 @@ func (im *RuntimeJavascriptInitModule) registerAfterEvent(r *goja.Runtime) func(
 	return im.registerHook(r, RuntimeExecutionModeAfter, "registerAfterEvent", "event")
 }
 
+func (im *RuntimeJavascriptInitModule) registerBeforeAny(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return im.registerHook(r, RuntimeExecutionModeBefore, "registerBeforeAny", "any")
+}
+
+func (im *RuntimeJavascriptInitModule) registerAfterAny(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return im.registerHook(r, RuntimeExecutionModeAfter, "registerAfterAny", "any")
+}
+
+func (im *RuntimeJavascriptInitModule) registerPeerEvent(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return im.registerHook(r, RuntimeExecutionModePeerEvent, "registerPeerEvent", "peerEvent")
+}
+
 func (im *RuntimeJavascriptInitModule) registerStorageIndex(r *goja.Runtime) func(call goja.FunctionCall) goja.Value {
 	return func(f goja.FunctionCall) goja.Value {
 		idxName := getJsString(r, f.Argument(0))
@@ -1946,5 +1962,7 @@ func (im *RuntimeJavascriptInitModule) registerCallbackFn(mode RuntimeExecutionM
 		im.Callbacks.SubscriptionNotificationGoogle = fn
 	case RuntimeExecutionModeStorageIndexFilter:
 		im.Callbacks.StorageIndexFilter[key] = fn
+	case RuntimeExecutionModePeerEvent:
+		im.Callbacks.EventPeer = fn
 	}
 }

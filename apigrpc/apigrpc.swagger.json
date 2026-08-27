@@ -1294,6 +1294,167 @@
         ]
       }
     },
+    "/v2/any/{name}/{cid}": {
+      "get": {
+        "summary": "Execute Call services on the server.",
+        "operationId": "Nakama_Any2",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiAnyResponseWriter"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "cid",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "header",
+            "description": "This is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "query",
+            "description": "This is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "context",
+            "description": "This is a request variable of the map type. The query format is \"map_name[key]=value\", e.g. If the map name is Age, the key type is string, and the value type is integer, the query parameter is expressed as Age[\"bob\"]=18",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "httpKey",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "bytesContent",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "byte"
+          },
+          {
+            "name": "stringContent",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Nakama"
+        ],
+        "security": [
+          {
+            "BearerJwt": [],
+            "HttpKeyAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "Execute Call services on the server.",
+        "operationId": "Nakama_Any",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/apiAnyResponseWriter"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "cid",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {
+                "header": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "query": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/definitions/apiAnyQuery"
+                  }
+                },
+                "context": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "httpKey": {
+                  "type": "string"
+                },
+                "bytesContent": {
+                  "type": "string",
+                  "format": "byte"
+                },
+                "stringContent": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ],
+        "tags": [
+          "Nakama"
+        ],
+        "security": [
+          {
+            "BearerJwt": [],
+            "HttpKeyAuth": []
+          }
+        ]
+      }
+    },
     "/v2/channel/{channelId}": {
       "get": {
         "summary": "List a channel's message history.",
@@ -4038,6 +4199,36 @@
       },
       "description": "Send a Steam token to the server. Used with authenticate/link/unlink."
     },
+    "apiAnyQuery": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "title": "微服务请求结构"
+    },
+    "apiAnyResponseWriter": {
+      "type": "object",
+      "properties": {
+        "header": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "bytesContent": {
+          "type": "string",
+          "format": "byte"
+        },
+        "stringContent": {
+          "type": "string"
+        }
+      }
+    },
     "apiChannelMessage": {
       "type": "object",
       "properties": {
@@ -5049,10 +5240,6 @@
         "authoritative": {
           "type": "boolean",
           "description": "Whether the leaderboard was created authoritatively or not."
-        },
-        "joinRequired": {
-          "type": "boolean",
-          "description": "Whether the user must join the tournament before being able to submit scores."
         }
       },
       "description": "A tournament on the server."

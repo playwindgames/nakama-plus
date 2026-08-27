@@ -26,10 +26,10 @@ import (
 	"time"
 
 	"github.com/dgryski/dgoogauth"
-	uuid "github.com/gofrs/uuid/v5"
-	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-plus/v3/console"
 	"github.com/doublemo/nakama-plus/v3/console/acl"
+	uuid "github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"

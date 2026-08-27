@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )

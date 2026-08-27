@@ -28,12 +28,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-plus/v3/console"
 	"github.com/doublemo/nakama-plus/v3/migrate"
 	"github.com/doublemo/nakama-plus/v3/se"
 	"github.com/doublemo/nakama-plus/v3/server"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/jackc/pgx/v5/stdlib" // Blank import to register SQL driver
 	"go.uber.org/zap"
@@ -68,8 +68,6 @@ var (
 )
 
 func main() {
-	defer os.Exit(0)
-
 	semver := fmt.Sprintf("%s+%s", version, commitID)
 	// Always set default timeout on HTTP client.
 	http.DefaultClient.Timeout = 1500 * time.Millisecond
@@ -205,7 +203,6 @@ func main() {
 		startupLogger.Fatal("Failed initializing runtime modules", zap.Error(err))
 	}
 	matchmaker := server.NewLocalMatchmaker(logger, startupLogger, config, router, metrics, runtime)
-	partyRegistry.Init(matchmaker, tracker, streamManager, router)
 	tracker.SetPartyJoinListener(partyRegistry.Join)
 	tracker.SetPartyLeaveListener(partyRegistry.Leave)
 
@@ -221,11 +218,31 @@ func main() {
 	pipeline := server.NewPipeline(logger, config, db, jsonpbMarshaler, jsonpbUnmarshaler, sessionRegistry, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, runtime, metrics)
 	statusHandler := server.NewLocalStatusHandler(logger, sessionRegistry, matchRegistry, partyRegistry, tracker, metrics, config.GetName(), createTime)
 
-	telemetryEnabled := os.Getenv("NAKAMA_TELEMETRY") != "0"
+	peer := server.NewLocalPeer(db, logger, config.GetName(), make(map[string]string), runtime, metrics, sessionRegistry, tracker, router, matchRegistry, matchmaker, partyRegistry, leaderboardCache, leaderboardRankCache, leaderboardScheduler, jsonpbMarshaler, jsonpbUnmarshaler, config, createTime)
+	sessionRegistry.SetPeer(peer)
+	statusHandler.SetPeer(peer)
+	matchRegistry.SetPeer(peer)
+	partyRegistry.Init(matchmaker, tracker, streamManager, router, peer)
+	runtime.SetPeer(peer)
+	tracker.SetPeer(peer)
+	router.SetPeer(peer)
+
+	numMembers, err := peer.Join(config.GetCluster().Members...)
+	if err != nil {
+		startupLogger.Fatal("failed to join cluster", zap.Error(err))
+	}
+
+	// 沿用 doublemo 的取值方向（默认不上报）。⚠️ 注意这是**反转**而非改名：
+	// 上游是 `!= "0"`（默认开启），doublemo 改成 `== "0"`。与本文件下方
+	// newOrLoadCookie 的注释（NAKAMA_TELEMETRY=0 表示关闭）是矛盾的。
+	// 之所以照搬：现网 SG 跑的就是这棵树，改回上游语义等于让本次升级顺带
+	// 打开向 Heroic Labs 的用量上报 —— 那是「顺带改行为」，本次移植要避免。
+	telemetryEnabled := os.Getenv("NAKAMA_TELEMETRY") == "0"
 	console.UIFS.Nt = !telemetryEnabled
 	cookie := newOrLoadCookie(telemetryEnabled, config)
 
 	apiServer := server.StartApiServer(logger, startupLogger, db, jsonpbMarshaler, jsonpbUnmarshaler, config, version, socialClient, storageIndex, leaderboardCache, leaderboardRankCache, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, matchmaker, tracker, router, streamManager, metrics, pipeline, runtime)
+	socketServer := server.StartSocketServer(logger, config, sessionRegistry, sessionCache, statusRegistry, matchmaker, tracker, metrics, runtime, jsonpbMarshaler, jsonpbUnmarshaler, pipeline)
 	consoleServer := server.StartConsoleServer(logger, startupLogger, db, config, tracker, router, streamManager, metrics, sessionRegistry, sessionCache, consoleSessionCache, loginAttemptCache, statusRegistry, statusHandler, runtimeInfo, matchRegistry, configWarnings, semver, leaderboardCache, leaderboardRankCache, leaderboardScheduler, storageIndex, apiServer, runtime, cookie, nil)
 
 	if telemetryEnabled {
@@ -240,7 +257,7 @@ func main() {
 	c := make(chan os.Signal, 2)
 	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	startupLogger.Info("Startup done")
+	startupLogger.Info("Startup done", zap.Int("numMembers", numMembers))
 
 	// Wait for a termination signal.
 	<-c
@@ -251,7 +268,9 @@ func main() {
 	ctxCancelFn()
 
 	// Gracefully stop remaining server components.
+	peer.Shutdown()
 	apiServer.Stop()
+	socketServer.Stop()
 	consoleServer.Stop()
 	matchmaker.Stop()
 	leaderboardScheduler.Stop()
@@ -263,6 +282,8 @@ func main() {
 	loginAttemptCache.Stop()
 
 	startupLogger.Info("Shutdown complete")
+
+	os.Exit(0)
 }
 
 // Help improve Nakama by sending anonymous usage statistics.

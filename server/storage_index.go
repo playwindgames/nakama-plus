@@ -29,8 +29,8 @@ import (
 	"github.com/blugelabs/bluge"
 	"github.com/blugelabs/bluge/index"
 	"github.com/blugelabs/bluge/search"
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -291,6 +291,7 @@ func (si *LocalStorageIndex) List(ctx context.Context, callerID uuid.UUID, index
 	if err != nil {
 		return nil, "", err
 	}
+
 	defer func() {
 		if err = indexReader.Close(); err != nil {
 			si.logger.Error("error closing index reader", zap.Error(err))
@@ -393,7 +394,6 @@ func (si *LocalStorageIndex) List(ctx context.Context, callerID uuid.UUID, index
 		// Reindex potentially stale indexed objects.
 		si.Write(ctx, staleIndexedObjects)
 	}
-
 	objects.Objects = sortedObjects
 
 	return objects, newCursor, nil

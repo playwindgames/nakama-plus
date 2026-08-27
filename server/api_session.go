@@ -16,10 +16,9 @@ package server
 
 import (
 	"context"
-	"errors"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -120,13 +119,13 @@ func (s *ApiServer) SessionLogout(ctx context.Context, in *api.SessionLogoutRequ
 	}
 
 	if err := SessionLogout(s.config, s.sessionCache, userID, in.Token, in.RefreshToken); err != nil {
-		if errors.Is(err, ErrSessionTokenInvalid) {
+		if err == ErrSessionTokenInvalid {
 			return nil, status.Error(codes.InvalidArgument, "Session token invalid.")
 		}
-		if errors.Is(err, ErrRefreshTokenInvalid) {
+		if err == ErrRefreshTokenInvalid {
 			return nil, status.Error(codes.InvalidArgument, "Refresh token invalid.")
 		}
-		logger.Error("Error processing session logout.", zap.Error(err))
+		s.logger.Error("Error processing session logout.", zap.Error(err))
 		return nil, status.Error(codes.Internal, "Error processing session logout.")
 	}
 

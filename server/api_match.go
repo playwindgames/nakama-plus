@@ -17,8 +17,8 @@ package server
 import (
 	"context"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,7 +76,7 @@ func (s *ApiServer) ListMatches(ctx context.Context, in *api.ListMatchesRequest)
 
 	results, _, err := s.matchRegistry.ListMatches(ctx, limit, in.Authoritative, in.Label, in.MinSize, in.MaxSize, in.Query, nil)
 	if err != nil {
-		logger.Error("Error listing matches", zap.Error(err))
+		s.logger.Error("Error listing matches", zap.Error(err))
 		return nil, status.Error(codes.Internal, "Error listing matches.")
 	}
 

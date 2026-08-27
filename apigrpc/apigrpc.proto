@@ -20,6 +20,7 @@ syntax = "proto3";
 package nakama.api;
 
 import "api/api.proto";
+import "api/api_any.proto";
 import "google/api/annotations.proto";
 import "google/protobuf/empty.proto";
 import "protoc-gen-openapiv2/options/annotations.proto";
@@ -762,6 +763,30 @@ service Nakama {
       additional_bindings {
         post: "/v2/tournament/{tournament_id}",
         body: "record",
+      }
+    };
+  }
+
+  // Execute Call services on the server.
+  rpc Any (api.AnyRequest) returns (api.AnyResponseWriter) {
+    option (google.api.http) = {
+      post: "/v2/any/{name}/{cid}",
+      body: "*",
+      additional_bindings {
+        get: "/v2/any/{name}/{cid}"
+      }
+    };
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_operation) = {
+      // Either HTTP key in query param or Bearer authentication.
+      security: {
+        security_requirement: {
+          key: "HttpKeyAuth";
+          value: {};
+        }
+        security_requirement: {
+          key: "BearerJwt";
+          value: {};
+        }
       }
     };
   }

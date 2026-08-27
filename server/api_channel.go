@@ -16,11 +16,10 @@ package server
 
 import (
 	"context"
-	"errors"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,11 +75,11 @@ func (s *ApiServer) ListChannelMessages(ctx context.Context, in *api.ListChannel
 	}
 
 	messageList, err := ChannelMessagesList(ctx, logger, s.db, userID, streamConversionResult.Stream, in.ChannelId, limit, forward, in.Cursor)
-	if errors.Is(err, runtime.ErrChannelCursorInvalid) {
+	if err == runtime.ErrChannelCursorInvalid {
 		return nil, status.Error(codes.InvalidArgument, "Cursor is invalid or expired.")
-	} else if errors.Is(err, runtime.ErrChannelGroupNotFound) {
+	} else if err == runtime.ErrChannelGroupNotFound {
 		return nil, status.Error(codes.InvalidArgument, "Group not found.")
-	} else if errors.Is(err, runtime.ErrChannelIDInvalid) {
+	} else if err == runtime.ErrChannelIDInvalid {
 		return nil, status.Error(codes.InvalidArgument, "Channel not found.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error listing messages from channel.")

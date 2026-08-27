@@ -56,6 +56,7 @@ type Config interface {
 	GetMFA() *MFAConfig
 	GetParty() *PartyConfig
 	GetLimit() int
+	GetCluster() *PeerConfig
 
 	Clone() (Config, error)
 	GetRuntimeConfig() (runtime.Config, error)
@@ -419,6 +420,7 @@ func ValidateConfig(logger *zap.Logger, c Config) map[string]string {
 	}
 
 	c.GetSatori().Validate(logger)
+	c.GetCluster().Validate(logger)
 
 	if k := c.GetMFA().StorageEncryptionKey; k != "" && len(k) != 32 {
 		logger.Fatal("MFA encryption key has to be 32 bits long")
@@ -487,6 +489,7 @@ type config struct {
 	MFA              *MFAConfig         `yaml:"mfa" json:"mfa" usage:"MFA settings."`
 	Party            *PartyConfig       `yaml:"party" json:"party" usage:"Party settings."`
 	Limit            int                `json:"-"` // Only used for migrate command.
+	Cluster          *PeerConfig        `yaml:"cluster" json:"cluster" usage:"Cluster settings."`
 }
 
 // NewConfig constructs a Config struct which represents server settings, and populates it with default values.
@@ -517,8 +520,8 @@ func NewConfig(logger *zap.Logger) *config {
 		Storage:          NewStorageConfig(),
 		Party:            NewPartyConfig(),
 		MFA:              NewMFAConfig(),
-
-		Limit: -1,
+		Limit:            -1,
+		Cluster:          NewPeerConfig(),
 	}
 }
 
@@ -549,9 +552,9 @@ func (c *config) Clone() (Config, error) {
 		GoogleAuth:       c.GoogleAuth.Clone(),
 		Storage:          c.Storage.Clone(),
 		MFA:              c.MFA.Clone(),
+		Cluster:          c.Cluster.Clone(),
 		Limit:            c.Limit,
 	}
-
 	return nc, nil
 }
 
@@ -672,6 +675,10 @@ func (c *config) GetRuntimeConfig() (runtime.Config, error) {
 
 func (c *config) GetLimit() int {
 	return c.Limit
+}
+
+func (c *config) GetCluster() *PeerConfig {
+	return c.Cluster
 }
 
 var _ runtime.LoggerConfig = (*LoggerConfig)(nil)

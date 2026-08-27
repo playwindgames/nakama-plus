@@ -15,8 +15,8 @@
 package server
 
 import (
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"net"
 	"sync"
 )

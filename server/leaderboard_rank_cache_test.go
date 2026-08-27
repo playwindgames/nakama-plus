@@ -17,8 +17,8 @@ package server
 import (
 	"testing"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"github.com/stretchr/testify/assert"
 )
 

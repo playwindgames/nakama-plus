@@ -32,15 +32,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/doublemo/nakama-common/api"
+	"github.com/doublemo/nakama-plus/v3/apigrpc"
+	"github.com/doublemo/nakama-plus/v3/internal/ctxkeys"
+	"github.com/doublemo/nakama-plus/v3/social"
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/doublemo/nakama-common/api"
-	"github.com/doublemo/nakama-plus/v3/apigrpc"
-	"github.com/doublemo/nakama-plus/v3/internal/ctxkeys"
-	"github.com/doublemo/nakama-plus/v3/social"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -94,6 +94,7 @@ type ApiServer struct {
 	runtime              *Runtime
 	grpcServer           *grpc.Server
 	grpcGatewayServer    *http.Server
+	protojsonMarshaler   *protojson.MarshalOptions
 }
 
 func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, storageIndex StorageIndex, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, partyRegistry PartyRegistry, matchmaker Matchmaker, tracker Tracker, router MessageRouter, streamManager StreamManager, metrics Metrics, pipeline *Pipeline, runtime *Runtime) *ApiServer {
@@ -123,7 +124,6 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		serverOpts = append(serverOpts, grpc.Creds(credentials.NewServerTLSFromCert(&config.GetSocket().TLSCert[0])))
 	}
 	grpcServer := grpc.NewServer(serverOpts...)
-
 	// Set grpc logger
 	grpcLogger, err := NewGrpcCustomLogger(logger)
 	if err != nil {
@@ -152,6 +152,7 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		matchmaker:           matchmaker,
 		runtime:              runtime,
 		grpcServer:           grpcServer,
+		protojsonMarshaler:   protojsonMarshaler,
 	}
 
 	// Register and start GRPC server.
@@ -175,10 +176,9 @@ func StartApiServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.DB, p
 		grpcgw.WithRoutingErrorHandler(handleRoutingError),
 		grpcgw.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
 			// For RPC GET operations pass through any custom query parameters.
-			if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v2/rpc/") {
+			if r.Method != http.MethodGet || (!strings.HasPrefix(r.URL.Path, "/v2/rpc/") && !strings.HasPrefix(r.URL.Path, "/v2/any/")) {
 				return metadata.MD{}
 			}
-
 			q := r.URL.Query()
 			p := make(map[string][]string, len(q))
 			for k, vs := range q {
@@ -411,8 +411,8 @@ func securityInterceptorFunc(logger *zap.Logger, config Config, sessionCache Ses
 			// Value of "authorization" or "grpc-authorization" username component did not match server key.
 			return nil, status.Error(codes.Unauthenticated, "Server key invalid")
 		}
-	case "/nakama.api.Nakama/RpcFunc":
-		// RPC allows full user authentication or HTTP key authentication.
+	case "/nakama.api.Nakama/Any":
+		// ANY allows full user authentication or HTTP key authentication.
 		md, ok := metadata.FromIncomingContext(ctx)
 		if !ok {
 			logger.Error("Cannot extract metadata from incoming context")
@@ -424,11 +424,63 @@ func securityInterceptorFunc(logger *zap.Logger, config Config, sessionCache Ses
 		}
 		if !ok {
 			// Neither "authorization" nor "grpc-authorization" were supplied. Try to validate HTTP key instead.
+			in, ok := req.(*api.AnyRequest)
+			if !ok {
+				logger.Error("Cannot extract Any from incoming request")
+				return nil, status.Error(codes.FailedPrecondition, "Auth token or HTTP key required")
+			}
+
+			httpKey := in.GetHttpKey()
+			if m, ok := in.Query["http_key"]; ok && m != nil && len(m.Value) > 0 {
+				httpKey = m.Value[0]
+			}
+
+			if httpKey == "" {
+				// HTTP key not present.
+				return nil, status.Error(codes.Unauthenticated, "Auth token or HTTP key required")
+			}
+
+			if httpKey != config.GetRuntime().HTTPKey {
+				// Value of HTTP key username component did not match.
+				return nil, status.Error(codes.Unauthenticated, "HTTP key invalid")
+			}
+		} else {
+			if len(auth) != 1 {
+				// Value of "authorization" or "grpc-authorization" was empty or repeated.
+				return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+			}
+			userID, username, vars, exp, tokenId, tokenIssuedAt, ok := parseBearerAuth([]byte(config.GetSession().EncryptionKey), auth[0])
+			if !ok {
+				// Value of "authorization" or "grpc-authorization" was malformed or expired.
+				return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+			}
+			if !sessionCache.IsValidSession(userID, exp, tokenId) {
+				return nil, status.Error(codes.Unauthenticated, "Auth token invalid")
+			}
+
+			ctx = populateCtx(ctx, userID, username, tokenId, vars, exp, tokenIssuedAt)
+		}
+
+	case "/nakama.api.Nakama/RpcFunc":
+		// RPC allows full user authentication or HTTP key authentication.
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			logger.Error("Cannot extract metadata from incoming context")
+			return nil, status.Error(codes.FailedPrecondition, "Cannot extract metadata from incoming context")
+		}
+		auth, ok := md["authorization"]
+		if !ok {
+			auth, ok = md["grpcgateway-authorization"]
+		}
+
+		if !ok {
+			// Neither "authorization" nor "grpc-authorization" were supplied. Try to validate HTTP key instead.
 			in, ok := req.(*api.Rpc)
 			if !ok {
 				logger.Error("Cannot extract Rpc from incoming request")
 				return nil, status.Error(codes.FailedPrecondition, "Auth token or HTTP key required")
 			}
+
 			if in.HttpKey == "" {
 				// HTTP key not present.
 				return nil, status.Error(codes.Unauthenticated, "Auth token or HTTP key required")
@@ -491,7 +543,6 @@ func populateCtx(ctx context.Context, userId uuid.UUID, username, tokenId string
 	ctx = context.WithValue(ctx, ctxVarsKey{}, vars)
 	ctx = context.WithValue(ctx, ctxExpiryKey{}, tokenExpiry)
 	ctx = context.WithValue(ctx, ctxTokenIssuedAtKey{}, tokenIssuedAt)
-
 	return ctx
 }
 

@@ -18,11 +18,12 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 )
 
+// should add and remove from PartyMatchmaker
 // should add and remove from PartyMatchmaker
 func TestPartyMatchmakerAddAndRemove(t *testing.T) {
 	consoleLogger := loggerForTest(t)
@@ -72,7 +73,7 @@ func createTestPartyHandler(t *testing.T, logger *zap.Logger, presence *rtapi.Us
 	dmr := DummyMessageRouter{}
 
 	pr := NewLocalPartyRegistry(context.Background(), logger, logger, cfg, node, metrics)
-	pr.Init(mm, &tt, &tsm, &dmr)
-	ph := NewPartyHandler(logger, pr, mm, &tt, &tsm, &dmr, uuid.UUID{}, node, true, 10, presence)
+	pr.Init(mm, &tt, &tsm, &dmr, nil)
+	ph := NewPartyHandler(logger, pr, mm, &tt, &tsm, &dmr, uuid.UUID{}, node, true, 10, presence, nil)
 	return ph, cleanup
 }

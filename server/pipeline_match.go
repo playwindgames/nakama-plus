@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/doublemo/nakama-common/rtapi"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -435,7 +435,6 @@ func (p *Pipeline) matchDataSend(ctx context.Context, logger *zap.Logger, sessio
 	if len(presenceIDs) == 0 {
 		return true, nil
 	}
-
 	outgoing := &rtapi.Envelope{Message: &rtapi.Envelope_MatchData{MatchData: &rtapi.MatchData{
 		MatchId: incoming.MatchId,
 		Presence: &rtapi.UserPresence{

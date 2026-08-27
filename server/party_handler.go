@@ -21,9 +21,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 )
 
@@ -64,9 +64,10 @@ type PartyHandler struct {
 	joinRequests          []*PartyJoinRequest
 
 	members *PartyPresenceList
+	peer    Peer
 }
 
-func NewPartyHandler(logger *zap.Logger, partyRegistry PartyRegistry, matchmaker Matchmaker, tracker Tracker, streamManager StreamManager, router MessageRouter, id uuid.UUID, node string, open bool, maxSize int, presence *rtapi.UserPresence) *PartyHandler {
+func NewPartyHandler(logger *zap.Logger, partyRegistry PartyRegistry, matchmaker Matchmaker, tracker Tracker, streamManager StreamManager, router MessageRouter, id uuid.UUID, node string, open bool, maxSize int, presence *rtapi.UserPresence, peer Peer) *PartyHandler {
 	idStr := fmt.Sprintf("%v.%v", id.String(), node)
 	ctx, ctxCancelFn := context.WithCancel(context.Background())
 
@@ -113,7 +114,9 @@ func NewPartyHandler(logger *zap.Logger, partyRegistry PartyRegistry, matchmaker
 		joinRequests: make([]*PartyJoinRequest, 0, maxSize),
 
 		members: NewPartyPresenceList(maxSize),
+		peer:    peer,
 	}
+
 	p.tick.Add(1)
 
 	// No errors expected here.
@@ -127,6 +130,9 @@ func (p *PartyHandler) stop() {
 	p.partyRegistry.Delete(p.ID)
 	p.tracker.UntrackByStream(p.Stream)
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	if p.peer != nil {
+		p.peer.MatchmakerRemovePartyAll(p.IDStr)
+	}
 }
 
 func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
@@ -152,6 +158,9 @@ func (p *PartyHandler) JoinRequest(presence *Presence) (bool, error) {
 		}
 		// The party membership has changed, stop any ongoing matchmaking processes.
 		_ = p.matchmaker.RemovePartyAll(p.IDStr)
+		if p.peer != nil {
+			p.peer.MatchmakerRemovePartyAll(p.IDStr)
+		}
 		return true, nil
 	}
 	// Check if party has room for more join requests.
@@ -353,6 +362,9 @@ func (p *PartyHandler) Leave(presences []*Presence) {
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	if p.peer != nil {
+		p.peer.MatchmakerRemovePartyAll(p.IDStr)
+	}
 }
 
 func (p *PartyHandler) Promote(sessionID, node string, presence *rtapi.UserPresence) error {
@@ -367,7 +379,6 @@ func (p *PartyHandler) Promote(sessionID, node string, presence *rtapi.UserPrese
 		p.Unlock()
 		return runtime.ErrPartyNotLeader
 	}
-
 	p.tick.Add(1)
 
 	members := p.members.List()
@@ -418,7 +429,6 @@ func (p *PartyHandler) Accept(sessionID, node string, presence *rtapi.UserPresen
 		p.Unlock()
 		return runtime.ErrPartyNotLeader
 	}
-
 	p.tick.Add(1)
 
 	// Check if there's room to accept the new party member.
@@ -470,7 +480,9 @@ func (p *PartyHandler) Accept(sessionID, node string, presence *rtapi.UserPresen
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
-
+	if p.peer != nil {
+		p.peer.MatchmakerRemovePartyAll(p.IDStr)
+	}
 	return nil
 }
 
@@ -486,7 +498,6 @@ func (p *PartyHandler) Remove(sessionID, node string, presence *rtapi.UserPresen
 		p.Unlock()
 		return runtime.ErrPartyNotLeader
 	}
-
 	p.tick.Add(1)
 
 	// Check if the leader is attempting to remove its own presence.
@@ -528,6 +539,9 @@ func (p *PartyHandler) Remove(sessionID, node string, presence *rtapi.UserPresen
 
 	// The party membership has changed, stop any ongoing matchmaking processes.
 	_ = p.matchmaker.RemovePartyAll(p.IDStr)
+	if p.peer != nil {
+		p.peer.MatchmakerRemovePartyAll(p.IDStr)
+	}
 
 	p.members.Leave([]*Presence{removeMember.Presence})
 
@@ -634,6 +648,20 @@ func (p *PartyHandler) MatchmakerAdd(sessionID, node, query string, minCount, ma
 	if err != nil {
 		return "", nil, err
 	}
+
+	if p.peer != nil {
+		p.peer.MatchmakerAdd(matchmakerExtract2pb(&MatchmakerExtract{
+			Presences:         presences,
+			SessionID:         "",
+			PartyId:           p.IDStr,
+			Query:             query,
+			MinCount:          minCount,
+			MaxCount:          maxCount,
+			CountMultiple:     countMultiple,
+			StringProperties:  stringProperties,
+			NumericProperties: numericProperties,
+		}))
+	}
 	return ticket, memberPresenceIDs, nil
 }
 
@@ -654,7 +682,14 @@ func (p *PartyHandler) MatchmakerRemove(sessionID, node, ticket string) error {
 
 	p.RUnlock()
 
-	return p.matchmaker.RemoveParty(p.IDStr, ticket)
+	if err := p.matchmaker.RemoveParty(p.IDStr, ticket); err != nil {
+		return err
+	}
+
+	if p.peer != nil {
+		p.peer.MatchmakerRemoveParty(p.IDStr, ticket)
+	}
+	return nil
 }
 
 func (p *PartyHandler) DataSend(sessionID, node string, opCode int64, data []byte) error {
@@ -690,9 +725,7 @@ func (p *PartyHandler) DataSend(sessionID, node string, opCode int64, data []byt
 	if sender == nil {
 		return runtime.ErrPartyNotMember
 	}
-
 	p.tick.Add(1)
-
 	if len(recipients) == 0 {
 		return nil
 	}
@@ -725,7 +758,6 @@ func (p *PartyHandler) Update(sessionID, node, label string, open, hidden bool) 
 		p.Unlock()
 		return runtime.ErrPartyNotLeader
 	}
-
 	p.tick.Add(1)
 
 	if err := p.partyRegistry.LabelUpdate(p.ID, p.Node, label, open, hidden, p.MaxSize, p.CreateTime); err != nil {

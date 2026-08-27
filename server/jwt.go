@@ -16,6 +16,7 @@ package server
 
 import (
 	"errors"
+
 	jwt "github.com/golang-jwt/jwt/v5"
 )
 

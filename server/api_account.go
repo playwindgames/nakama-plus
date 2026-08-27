@@ -18,8 +18,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -95,7 +95,8 @@ func (s *ApiServer) DeleteAccount(ctx context.Context, in *emptypb.Empty) (*empt
 		}
 	}
 
-	if err := DeleteAccount(ctx, logger, s.db, s.config, s.leaderboardCache, s.leaderboardRankCache, s.sessionRegistry, s.sessionCache, s.tracker, userID, false); err != nil {
+	peer, _ := s.router.GetPeer()
+	if err := DeleteAccount(ctx, logger, s.db, s.config, s.leaderboardCache, s.leaderboardRankCache, s.sessionRegistry, s.sessionCache, s.tracker, peer, userID, false); err != nil {
 		if errors.Is(err, ErrAccountNotFound) {
 			return nil, status.Error(codes.NotFound, "Account not found.")
 		}

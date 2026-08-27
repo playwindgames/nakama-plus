@@ -5036,6 +5036,46 @@
       },
       "description": "Request to send a notification."
     },
+    "ServiceStatus": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Node name."
+        },
+        "vars": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "ip": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "role": {
+          "type": "string"
+        },
+        "status": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "weight": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "balancer": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "allow_stream": {
+          "type": "boolean"
+        }
+      }
+    },
     "Setting": {
       "type": "object",
       "properties": {
@@ -5122,6 +5162,13 @@
           "type": "string",
           "format": "date-time",
           "title": "Timestamp"
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/ServiceStatus"
+          }
         }
       },
       "description": "List of nodes and their stats."
@@ -5176,6 +5223,10 @@
           "type": "number",
           "format": "double",
           "description": "Average output bandwidth usage."
+        },
+        "leader": {
+          "type": "boolean",
+          "title": "Leader"
         },
         "party_count": {
           "type": "integer",
@@ -6204,6 +6255,10 @@
           "type": "integer",
           "format": "int64",
           "description": "The UNIX time when the tournament is next playable. A computed value."
+        },
+        "node": {
+          "type": "string",
+          "title": "running on node"
         }
       },
       "description": "A leaderboard."

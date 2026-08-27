@@ -18,9 +18,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -68,7 +68,7 @@ func (s *ApiServer) CreateGroup(ctx context.Context, in *api.CreateGroupRequest)
 
 	group, err := CreateGroup(ctx, logger, s.db, userID, userID, in.GetName(), in.GetLangTag(), in.GetDescription(), in.GetAvatarUrl(), "", in.GetOpen(), maxCount)
 	if err != nil {
-		if errors.Is(err, runtime.ErrGroupNameInUse) {
+		if err == runtime.ErrGroupNameInUse {
 			return nil, status.Error(codes.AlreadyExists, "Group name is in use.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to create group.")
@@ -201,7 +201,7 @@ func (s *ApiServer) DeleteGroup(ctx context.Context, in *api.DeleteGroupRequest)
 
 	err = DeleteGroup(ctx, logger, s.db, s.tracker, groupID, userID)
 	if err != nil {
-		if errors.Is(err, runtime.ErrGroupPermissionDenied) {
+		if err == runtime.ErrGroupPermissionDenied {
 			return nil, status.Error(codes.InvalidArgument, "Group not found or you're not allowed to delete.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to delete group.")
@@ -321,7 +321,7 @@ func (s *ApiServer) LeaveGroup(ctx context.Context, in *api.LeaveGroupRequest) (
 
 	err = LeaveGroup(ctx, logger, s.db, s.tracker, s.router, s.streamManager, groupID, userID, username)
 	if err != nil {
-		if errors.Is(err, runtime.ErrGroupLastSuperadmin) {
+		if err == runtime.ErrGroupLastSuperadmin {
 			return nil, status.Error(codes.InvalidArgument, "Cannot leave group when you are the last superadmin.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to leave group.")
@@ -353,7 +353,7 @@ func (s *ApiServer) AddGroupUsers(ctx context.Context, in *api.AddGroupUsersRequ
 			}
 			if result == nil {
 				// If result is nil, requested resource is disabled.
-				logger.Warn("Intercepted a disabled resource.", zap.Any("resource", ctx.Value(ctxFullMethodKey{}).(string)), zap.String("uid", userID.String()))
+				s.logger.Warn("Intercepted a disabled resource.", zap.Any("resource", ctx.Value(ctxFullMethodKey{}).(string)), zap.String("uid", userID.String()))
 				return status.Error(codes.NotFound, "Requested resource was not found.")
 			}
 			in = result
@@ -466,7 +466,7 @@ func (s *ApiServer) BanGroupUsers(ctx context.Context, in *api.BanGroupUsersRequ
 	}
 
 	if err = BanGroupUsers(ctx, logger, s.db, s.tracker, s.router, s.streamManager, userID, groupID, userIDs); err != nil {
-		if errors.Is(err, runtime.ErrGroupPermissionDenied) {
+		if err == runtime.ErrGroupPermissionDenied {
 			return nil, status.Error(codes.NotFound, "Group not found or permission denied.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to ban users from a group.")
@@ -535,7 +535,7 @@ func (s *ApiServer) KickGroupUsers(ctx context.Context, in *api.KickGroupUsersRe
 	}
 
 	if err = KickGroupUsers(ctx, logger, s.db, s.tracker, s.router, s.streamManager, userID, groupID, userIDs, false); err != nil {
-		if errors.Is(err, runtime.ErrGroupPermissionDenied) {
+		if err == runtime.ErrGroupPermissionDenied {
 			return nil, status.Error(codes.NotFound, "Group not found or permission denied.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to kick users from a group.")
@@ -679,7 +679,7 @@ func (s *ApiServer) ListGroupUsers(ctx context.Context, in *api.ListGroupUsersRe
 
 	groupUsers, err := ListGroupUsers(ctx, logger, s.db, s.statusRegistry, groupID, limit, state, in.GetCursor())
 	if err != nil {
-		if errors.Is(err, runtime.ErrGroupUserInvalidCursor) {
+		if err == runtime.ErrGroupUserInvalidCursor {
 			return nil, status.Error(codes.InvalidArgument, "Cursor is invalid.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to list users in a group.")
@@ -699,8 +699,8 @@ func (s *ApiServer) ListGroupUsers(ctx context.Context, in *api.ListGroupUsersRe
 }
 
 func (s *ApiServer) DemoteGroupUsers(ctx context.Context, in *api.DemoteGroupUsersRequest) (*emptypb.Empty, error) {
-	logger, traceID := LoggerWithTraceId(ctx, s.logger)
 	userID := ctx.Value(ctxUserIDKey{}).(uuid.UUID)
+	logger, traceID := LoggerWithTraceId(ctx, s.logger)
 
 	// Before hook.
 	if fn := s.runtime.BeforeDemoteGroupUsers(); fn != nil {
@@ -711,7 +711,7 @@ func (s *ApiServer) DemoteGroupUsers(ctx context.Context, in *api.DemoteGroupUse
 			}
 			if result == nil {
 				// If result is nil, requested resource is disabled.
-				logger.Warn("Intercepted a disabled resource.", zap.Any("resource", ctx.Value(ctxFullMethodKey{}).(string)), zap.String("uid", userID.String()))
+				s.logger.Warn("Intercepted a disabled resource.", zap.Any("resource", ctx.Value(ctxFullMethodKey{}).(string)), zap.String("uid", userID.String()))
 				return status.Error(codes.NotFound, "Requested resource was not found.")
 			}
 			in = result
@@ -823,7 +823,7 @@ func (s *ApiServer) ListUserGroups(ctx context.Context, in *api.ListUserGroupsRe
 
 	userGroups, err := ListUserGroups(ctx, logger, s.db, userID, limit, state, in.GetCursor())
 	if err != nil {
-		if errors.Is(err, runtime.ErrUserGroupInvalidCursor) {
+		if err == runtime.ErrUserGroupInvalidCursor {
 			return nil, status.Error(codes.InvalidArgument, "Cursor is invalid.")
 		}
 		return nil, status.Error(codes.Internal, "Error while trying to list groups for a user.")

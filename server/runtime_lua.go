@@ -28,13 +28,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/doublemo/nakama-common/runtime"
-
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
+	"github.com/doublemo/nakama-common/runtime"
 	lua "github.com/doublemo/nakama-plus/v3/internal/gopher-lua"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
@@ -67,6 +66,7 @@ type RuntimeLuaCallbacks struct {
 	PurchaseNotificationGoogle     *lua.LFunction
 	SubscriptionNotificationGoogle *lua.LFunction
 	StorageIndexFilter             *MapOf[string, *lua.LFunction]
+	EventPeer                      *lua.LFunction
 }
 
 type RuntimeLuaModule struct {
@@ -115,14 +115,14 @@ type RuntimeProviderLua struct {
 	statsCtx context.Context
 }
 
-func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, partyRegistry PartyRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, satoriClient runtime.Satori, eventFn RuntimeEventCustomFunction, rootPath string, paths []string, matchProvider *MatchProvider, storageIndex StorageIndex) ([]string, map[string]RuntimeRpcFunction, map[string]RuntimeBeforeRtFunction, map[string]RuntimeAfterRtFunction, *RuntimeBeforeReqFunctions, *RuntimeAfterReqFunctions, RuntimeMatchmakerMatchedFunction, RuntimeTournamentEndFunction, RuntimeTournamentResetFunction, RuntimeLeaderboardResetFunction, RuntimeShutdownFunction, RuntimePurchaseNotificationAppleFunction, RuntimeSubscriptionNotificationAppleFunction, RuntimePurchaseNotificationGoogleFunction, RuntimeSubscriptionNotificationGoogleFunction, map[string]RuntimeStorageIndexFilterFunction, error) {
+func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logger, db *sql.DB, protojsonMarshaler *protojson.MarshalOptions, protojsonUnmarshaler *protojson.UnmarshalOptions, config Config, version string, socialClient *social.Client, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, leaderboardScheduler LeaderboardScheduler, sessionRegistry SessionRegistry, sessionCache SessionCache, statusRegistry StatusRegistry, matchRegistry MatchRegistry, partyRegistry PartyRegistry, tracker Tracker, metrics Metrics, streamManager StreamManager, router MessageRouter, satoriClient runtime.Satori, eventFn RuntimeEventCustomFunction, rootPath string, paths []string, matchProvider *MatchProvider, storageIndex StorageIndex) ([]string, map[string]RuntimeRpcFunction, map[string]RuntimeBeforeRtFunction, map[string]RuntimeAfterRtFunction, *RuntimeBeforeReqFunctions, *RuntimeAfterReqFunctions, RuntimeMatchmakerMatchedFunction, RuntimeTournamentEndFunction, RuntimeTournamentResetFunction, RuntimeLeaderboardResetFunction, RuntimeShutdownFunction, RuntimePurchaseNotificationAppleFunction, RuntimeSubscriptionNotificationAppleFunction, RuntimePurchaseNotificationGoogleFunction, RuntimeSubscriptionNotificationGoogleFunction, map[string]RuntimeStorageIndexFilterFunction, RuntimeEventPeerFunction, error) {
 	startupLogger.Info("Initialising Lua runtime provider", zap.String("path", rootPath))
 
 	// Load Lua modules into memory by reading the file contents. No evaluation/execution at this stage.
 	moduleCache, modulePaths, stdLibs, err := openLuaModules(startupLogger, rootPath, paths)
 	if err != nil {
 		// Errors already logged in the function call above.
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 
 	once := &sync.Once{}
@@ -141,6 +141,7 @@ func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logge
 	var subscriptionNotificationAppleFunction RuntimeSubscriptionNotificationAppleFunction
 	var purchaseNotificationGoogleFunction RuntimePurchaseNotificationGoogleFunction
 	var subscriptionNotificationGoogleFunction RuntimeSubscriptionNotificationGoogleFunction
+	var eventPeerFunction RuntimeEventPeerFunction
 	storageIndexFilterFunctions := make(map[string]RuntimeStorageIndexFilterFunction, 0)
 
 	var sharedReg *lua.LTable
@@ -833,6 +834,15 @@ func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logge
 						}
 						return result.(*api.Event), nil, 0
 					}
+
+				case "any":
+					beforeReqFunctions.beforeAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.AnyRequest) (*api.AnyRequest, error, codes.Code) {
+						result, err, code := runtimeProviderLua.BeforeReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, in)
+						if result == nil || err != nil {
+							return nil, err, code
+						}
+						return result.(*api.AnyRequest), nil, 0
+					}
 				}
 			}
 		case RuntimeExecutionModeAfter:
@@ -1163,6 +1173,10 @@ func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logge
 					afterReqFunctions.afterEventFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, in *api.Event) error {
 						return runtimeProviderLua.AfterReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, nil, in)
 					}
+				case "any":
+					afterReqFunctions.afterAnyFunction = func(ctx context.Context, logger *zap.Logger, traceID, userID, username string, vars map[string]string, expiry int64, clientIP, clientPort string, out *api.AnyResponseWriter, in *api.AnyRequest) error {
+						return runtimeProviderLua.AfterReq(ctx, id, logger, traceID, userID, username, vars, expiry, clientIP, clientPort, out, in)
+					}
 				}
 			}
 		case RuntimeExecutionModeMatchmaker:
@@ -1221,10 +1235,14 @@ func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logge
 			storageIndexFilterFunctions[id] = func(ctx context.Context, write *StorageOpWrite) (bool, error) {
 				return runtimeProviderLua.StorageIndexFilter(ctx, id, write)
 			}
+		case RuntimeExecutionModePeerEvent:
+			eventPeerFunction = func(ctx context.Context, logger runtime.Logger, in *api.AnyRequest) {
+				runtimeProviderLua.EventPeer(ctx, logger, in)
+			}
 		}
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 
 	if config.GetRuntime().GetLuaReadOnlyGlobals() {
@@ -1298,7 +1316,7 @@ func NewRuntimeProviderLua(ctx context.Context, logger, startupLogger *zap.Logge
 	}
 	startupLogger.Info("Allocated minimum Lua runtime pool")
 
-	return modulePaths, rpcFunctions, beforeRtFunctions, afterRtFunctions, beforeReqFunctions, afterReqFunctions, matchmakerMatchedFunction, tournamentEndFunction, tournamentResetFunction, leaderboardResetFunction, shutdownFunction, purchaseNotificationAppleFunction, subscriptionNotificationAppleFunction, purchaseNotificationGoogleFunction, subscriptionNotificationGoogleFunction, storageIndexFilterFunctions, nil
+	return modulePaths, rpcFunctions, beforeRtFunctions, afterRtFunctions, beforeReqFunctions, afterReqFunctions, matchmakerMatchedFunction, tournamentEndFunction, tournamentResetFunction, leaderboardResetFunction, shutdownFunction, purchaseNotificationAppleFunction, subscriptionNotificationAppleFunction, purchaseNotificationGoogleFunction, subscriptionNotificationGoogleFunction, storageIndexFilterFunctions, eventPeerFunction, nil
 }
 
 func CheckRuntimeProviderLua(logger *zap.Logger, config Config, version string, paths []string) error {
@@ -2246,6 +2264,40 @@ func (rp *RuntimeProviderLua) Put(r *RuntimeLua) {
 	}
 }
 
+func (rp *RuntimeProviderLua) EventPeer(ctx context.Context, logger runtime.Logger, in *api.AnyRequest) error {
+	r, err := rp.Get(ctx)
+	if err != nil {
+		return err
+	}
+	lf := r.GetCallback(RuntimeExecutionModePeerEvent, "")
+	if lf == nil {
+		rp.Put(r)
+		return errors.New("Runtime Subscription Notification Google function not found.")
+	}
+
+	luaCtx := NewRuntimeLuaContext(r.vm, r.node, r.version, r.luaEnv, RuntimeExecutionModePeerEvent, nil, nil, "", 0, "", "", nil, "", "", "", "")
+
+	anyRequestTable := anyRequestToLuaTable(r.vm, in)
+
+	// Set context value used for logging
+	vmCtx := context.WithValue(ctx, ctxLoggerFields{}, map[string]string{"mode": RuntimeExecutionModePeerEvent.String()})
+	vmCtx = NewRuntimeGoContext(vmCtx, r.node, r.version, r.env, RuntimeExecutionModePeerEvent, nil, nil, "", 0, "", "", nil, "", "", "", "")
+	r.vm.SetContext(vmCtx)
+	retValue, err, _, _ := r.invokeFunction(r.vm, lf, luaCtx, anyRequestTable)
+	r.vm.SetContext(context.Background())
+	rp.Put(r)
+	if err != nil {
+		return errors.New("Could not run event peer hook.")
+	}
+
+	if retValue == nil || retValue == lua.LNil {
+		// No return value needed.
+		return nil
+	}
+
+	return errors.New("Unexpected return type from runtime event peer hook, must be nil.")
+}
+
 type RuntimeLua struct {
 	logger    *zap.Logger
 	node      string
@@ -2371,6 +2423,8 @@ func (r *RuntimeLua) GetCallback(e RuntimeExecutionMode, key string) *lua.LFunct
 			return nil
 		}
 		return fn
+	case RuntimeExecutionModePeerEvent:
+		return r.callbacks.EventPeer
 	}
 
 	return nil
@@ -2563,6 +2617,8 @@ func newRuntimeLuaVM(logger *zap.Logger, db *sql.DB, protojsonMarshaler *protojs
 			callbacks.SubscriptionNotificationGoogle = fn
 		case RuntimeExecutionModeStorageIndexFilter:
 			callbacks.StorageIndexFilter.Store(key, fn)
+		case RuntimeExecutionModePeerEvent:
+			callbacks.EventPeer = fn
 		}
 	}
 	nakamaModule := NewRuntimeLuaNakamaModule(logger, db, protojsonMarshaler, protojsonUnmarshaler, config, version, socialClient, leaderboardCache, rankCache, leaderboardScheduler, sessionRegistry, sessionCache, statusRegistry, matchRegistry, partyRegistry, tracker, metrics, streamManager, router, once, localCache, storageIndex, satoriClient, matchCreateFn, eventFn, registerCallbackFn, announceCallbackFn)

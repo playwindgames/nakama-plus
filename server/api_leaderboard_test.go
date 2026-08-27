@@ -7,9 +7,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-plus/v3/apigrpc"
+	"github.com/gofrs/uuid/v5"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/wrapperspb"

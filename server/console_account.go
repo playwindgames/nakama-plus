@@ -28,9 +28,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/gofrs/uuid/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -96,7 +96,8 @@ func (s *ConsoleServer) DeleteAccount(ctx context.Context, in *console.AccountDe
 		return nil, status.Error(codes.InvalidArgument, "Requires a valid user ID.")
 	}
 
-	if err = DeleteAccount(ctx, logger, s.db, s.config, s.leaderboardCache, s.leaderboardRankCache, s.sessionRegistry, s.sessionCache, s.tracker, userID, in.RecordDeletion != nil && in.RecordDeletion.Value); err != nil {
+	peer, _ := s.router.GetPeer()
+	if err = DeleteAccount(ctx, logger, s.db, s.config, s.leaderboardCache, s.leaderboardRankCache, s.sessionRegistry, s.sessionCache, s.tracker, peer, userID, in.RecordDeletion != nil && in.RecordDeletion.Value); err != nil {
 		// Error already logged in function above.
 		return nil, status.Error(codes.Internal, "An error occurred while trying to delete the user.")
 	}
@@ -106,8 +107,8 @@ func (s *ConsoleServer) DeleteAccount(ctx context.Context, in *console.AccountDe
 
 // Deprecated: replaced by DeleteAllData
 func (s *ConsoleServer) DeleteAccounts(ctx context.Context, in *emptypb.Empty) (*emptypb.Empty, error) {
-	// Delete all but the system user. Related data will be removed by cascading constraints.
 	logger, _ := LoggerWithTraceId(ctx, s.logger)
+	// Delete all but the system user. Related data will be removed by cascading constraints.
 	_, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id <> '00000000-0000-0000-0000-000000000000'")
 	if err != nil {
 		logger.Error("Error deleting all user accounts.", zap.Error(err))
@@ -337,9 +338,9 @@ func (s *ConsoleServer) GetWalletLedger(ctx context.Context, in *console.GetWall
 }
 
 func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccountsRequest) (*console.AccountList, error) {
-	logger, _ := LoggerWithTraceId(ctx, s.logger)
 	const defaultLimit = 50
 
+	logger, _ := LoggerWithTraceId(ctx, s.logger)
 	// Searching only through tombstone records.
 	if in.Tombstones {
 		var userID *uuid.UUID
@@ -491,13 +492,11 @@ func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccoun
 				logger.Error("Error scanning users.", zap.Any("in", in), zap.Error(err))
 				return nil, status.Error(codes.Internal, "An error occurred while trying to list users.")
 			}
-
 			user.DisplayName = html.EscapeString(user.DisplayName)
 			user.AvatarUrl = html.EscapeString(user.AvatarUrl)
 			user.LangTag = html.EscapeString(user.LangTag)
 			user.Location = html.EscapeString(user.Location)
 			user.Timezone = html.EscapeString(user.Timezone)
-
 			users = append(users, user)
 		}
 		_ = rows.Close()
@@ -525,13 +524,11 @@ func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccoun
 					logger.Error("Error scanning users.", zap.Any("in", in), zap.Error(err))
 					return nil, status.Error(codes.Internal, "An error occurred while trying to list users.")
 				}
-
 				user.DisplayName = html.EscapeString(user.DisplayName)
 				user.AvatarUrl = html.EscapeString(user.AvatarUrl)
 				user.LangTag = html.EscapeString(user.LangTag)
 				user.Location = html.EscapeString(user.Location)
 				user.Timezone = html.EscapeString(user.Timezone)
-
 				users = append(users, user)
 			}
 			_ = rows.Close()
@@ -597,13 +594,11 @@ func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccoun
 			logger.Error("Error scanning users.", zap.Any("in", in), zap.Error(err))
 			return nil, status.Error(codes.Internal, "An error occurred while trying to list users.")
 		}
-
 		user.DisplayName = html.EscapeString(user.DisplayName)
 		user.AvatarUrl = html.EscapeString(user.AvatarUrl)
 		user.LangTag = html.EscapeString(user.LangTag)
 		user.Location = html.EscapeString(user.Location)
 		user.Timezone = html.EscapeString(user.Timezone)
-
 		users = append(users, user)
 		previousUser = user
 	}
@@ -613,7 +608,7 @@ func (s *ConsoleServer) ListAccounts(ctx context.Context, in *console.ListAccoun
 
 	response := &console.AccountList{
 		Users:      users,
-		TotalCount: countDatabase(ctx, logger, s.db, "users"),
+		TotalCount: countDatabase(ctx, s.logger, s.db, "users"),
 	}
 
 	if nextCursor != nil {
@@ -747,7 +742,7 @@ func (s *ConsoleServer) UpdateAccount(ctx context.Context, in *console.UpdateAcc
 		}
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(p), bcryptHashCost)
 		if err != nil {
-			logger.Error("Error hashing password.", zap.Error(err))
+			s.logger.Error("Error hashing password.", zap.Error(err))
 			return nil, status.Error(codes.Internal, "Error updating user account password.")
 		}
 		newPassword = hashedPassword

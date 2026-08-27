@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
 )

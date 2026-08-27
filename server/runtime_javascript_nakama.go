@@ -37,19 +37,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/dop251/goja"
-	"github.com/gofrs/uuid/v5"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
 	"github.com/doublemo/nakama-plus/v3/console"
 	"github.com/doublemo/nakama-plus/v3/internal/cronexpr"
 	"github.com/doublemo/nakama-plus/v3/social"
+	"github.com/gofrs/uuid/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -123,8 +124,7 @@ func NewRuntimeJavascriptNakamaModule(logger *zap.Logger, db *sql.DB, protojsonM
 	}
 }
 
-func (n *RuntimeJavascriptNakamaModule) Constructor(r *goja.Runtime) (*goja.Object,
-	error) {
+func (n *RuntimeJavascriptNakamaModule) Constructor(r *goja.Runtime) (*goja.Object, error) {
 	satoriJsObj, err := n.satoriConstructor(r)
 	if err != nil {
 		return nil, err
@@ -187,7 +187,6 @@ func (n *RuntimeJavascriptNakamaModule) mappings(r *goja.Runtime) map[string]fun
 		"accountUpdateId":                      n.accountUpdateId(r),
 		"accountDeleteId":                      n.accountDeleteId(r),
 		"accountExportId":                      n.accountExportId(r),
-		"accountImportId":                      n.accountImportId(r),
 		"usersGetId":                           n.usersGetId(r),
 		"usersGetUsername":                     n.usersGetUsername(r),
 		"usersGetFriendStatus":                 n.usersGetFriendStatus(r),
@@ -316,6 +315,9 @@ func (n *RuntimeJavascriptNakamaModule) mappings(r *goja.Runtime) map[string]fun
 		"storageIndexList":                     n.storageIndexList(r),
 		"partyList":                            n.partyList(r),
 		"secureRandomBytes":                    n.secureRandomBytes(r),
+		"invokeMS":                             n.invokeMS(r),
+		"sendMS":                               n.sendMS(r),
+		"eventPeer":                            n.eventPeer(r),
 	}
 }
 
@@ -2165,7 +2167,8 @@ func (n *RuntimeJavascriptNakamaModule) accountDeleteId(r *goja.Runtime) func(go
 			recorded = getJsBool(r, f.Argument(1))
 		}
 
-		if err := DeleteAccount(n.ctx, n.logger, n.db, n.config, n.leaderboardCache, n.rankCache, n.sessionRegistry, n.sessionCache, n.tracker, userID, recorded); err != nil {
+		peer, _ := n.router.GetPeer()
+		if err := DeleteAccount(n.ctx, n.logger, n.db, n.config, n.leaderboardCache, n.rankCache, n.sessionRegistry, n.sessionCache, n.tracker, peer, userID, recorded); err != nil {
 			panic(r.NewGoError(fmt.Errorf("error while trying to delete account: %v", err.Error())))
 		}
 
@@ -5911,9 +5914,13 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardCreate(r *goja.Runtime) func(
 			enableRanks = getJsBool(r, f.Argument(6))
 		}
 
-		_, created, err := n.leaderboardCache.Create(n.ctx, leaderboardID, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadata, enableRanks)
+		leaderboard, created, err := n.leaderboardCache.Create(n.ctx, leaderboardID, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadata, enableRanks)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("error creating leaderboard: %v", err.Error())))
+		}
+
+		if peer, ok := n.router.GetPeer(); ok {
+			peer.LeaderboardCreate(leaderboard, created)
 		}
 
 		if created {
@@ -5939,6 +5946,10 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardDelete(r *goja.Runtime) func(
 		_, err := n.leaderboardCache.Delete(n.ctx, n.rankCache, n.leaderboardScheduler, id)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("error deleting leaderboard: %v", err.Error())))
+		}
+
+		if peer, ok := n.router.GetPeer(); ok {
+			peer.LeaderboardRemove(id)
 		}
 
 		return goja.Undefined()
@@ -6013,6 +6024,12 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardRanksDisable(r *goja.Runtime)
 
 		if err := disableLeaderboardRanks(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, id); err != nil {
 			panic(r.NewGoError(err))
+		}
+
+		if peer, ok := n.router.GetPeer(); ok {
+			if l := n.leaderboardCache.Get(id); l != nil {
+				peer.LeaderboardInsert(l.Id, l.Authoritative, l.SortOrder, l.Operator, l.ResetScheduleStr, l.Metadata, l.CreateTime, false)
+			}
 		}
 
 		return goja.Undefined()
@@ -6216,7 +6233,8 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardRecordWrite(r *goja.Runtime) 
 			}
 		}
 
-		record, err := LeaderboardRecordWrite(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, overrideOperatorValue)
+		peer, _ := n.router.GetPeer()
+		record, err := LeaderboardRecordWrite(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID, username, score, subscore, metadataStr, overrideOperatorValue)
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("error writing leaderboard record: %v", err.Error())))
 		}
@@ -6242,7 +6260,8 @@ func (n *RuntimeJavascriptNakamaModule) leaderboardRecordDelete(r *goja.Runtime)
 			panic(r.NewTypeError("expects owner ID to be a valid identifier"))
 		}
 
-		if err := LeaderboardRecordDelete(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID); err != nil {
+		peer, _ := n.router.GetPeer()
+		if err := LeaderboardRecordDelete(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID); err != nil {
 			panic(r.NewGoError(fmt.Errorf("error deleting leaderboard record: %v", err.Error())))
 		}
 
@@ -6999,8 +7018,13 @@ func (n *RuntimeJavascriptNakamaModule) tournamentCreate(r *goja.Runtime) func(g
 			enableRanks = getJsBool(r, f.Argument(15))
 		}
 
-		if err := TournamentCreate(n.ctx, n.logger, n.leaderboardCache, n.leaderboardScheduler, id, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, title, description, category, startTime, endTime, duration, maxSize, maxNumScore, joinRequired, enableRanks); err != nil {
+		created, err := TournamentCreate(n.ctx, n.logger, n.leaderboardCache, n.leaderboardScheduler, id, authoritative, sortOrderNumber, operatorNumber, resetSchedule, metadataStr, title, description, category, startTime, endTime, duration, maxSize, maxNumScore, joinRequired, enableRanks)
+		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("error creating tournament: %v", err.Error())))
+		}
+
+		if peer, ok := n.router.GetPeer(); ok {
+			peer.LeaderboardCreateTournament(n.leaderboardCache.Get(id), created)
 		}
 
 		return goja.Undefined()
@@ -7020,6 +7044,10 @@ func (n *RuntimeJavascriptNakamaModule) tournamentDelete(r *goja.Runtime) func(g
 
 		if err := TournamentDelete(n.ctx, n.leaderboardCache, n.rankCache, n.leaderboardScheduler, id); err != nil {
 			panic(r.NewGoError(fmt.Errorf("error deleting tournament: %v", err.Error())))
+		}
+
+		if peer, ok := n.router.GetPeer(); ok {
+			peer.LeaderboardRemove(id)
 		}
 
 		return goja.Undefined()
@@ -7086,7 +7114,8 @@ func (n *RuntimeJavascriptNakamaModule) tournamentJoin(r *goja.Runtime) func(goj
 			panic(r.NewTypeError("expects a username string"))
 		}
 
-		if err := TournamentJoin(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, uid, username, id); err != nil {
+		peer, _ := n.router.GetPeer()
+		if err := TournamentJoin(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uid, username, id); err != nil {
 			panic(r.NewGoError(fmt.Errorf("error joining tournament: %v", err.Error())))
 		}
 
@@ -7375,6 +7404,11 @@ func (n *RuntimeJavascriptNakamaModule) tournamentRanksDisable(r *goja.Runtime) 
 			panic(r.NewGoError(err))
 		}
 
+		if peer, ok := n.router.GetPeer(); ok {
+			if l := n.leaderboardCache.Get(id); l != nil {
+				peer.LeaderboardInsertTournament(l)
+			}
+		}
 		return goja.Undefined()
 	}
 }
@@ -7442,7 +7476,8 @@ func (n *RuntimeJavascriptNakamaModule) tournamentRecordWrite(r *goja.Runtime) f
 			}
 		}
 
-		record, err := TournamentRecordWrite(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, userID, username, score, subscore, metadataStr, api.Operator(overrideOperator))
+		peer, _ := n.router.GetPeer()
+		record, err := TournamentRecordWrite(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, userID, username, score, subscore, metadataStr, api.Operator(overrideOperator))
 		if err != nil {
 			panic(r.NewGoError(fmt.Errorf("error writing tournament record: %v", err.Error())))
 		}
@@ -7468,7 +7503,8 @@ func (n *RuntimeJavascriptNakamaModule) tournamentRecordDelete(r *goja.Runtime) 
 			panic(r.NewTypeError("expects owner ID to be a valid identifier"))
 		}
 
-		if err := TournamentRecordDelete(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, uuid.Nil, id, ownerID); err != nil {
+		peer, _ := n.router.GetPeer()
+		if err := TournamentRecordDelete(n.ctx, n.logger, n.db, n.leaderboardCache, n.rankCache, peer, uuid.Nil, id, ownerID); err != nil {
 			panic(r.NewGoError(fmt.Errorf("error deleting tournament record: %v", err.Error())))
 		}
 
@@ -8802,7 +8838,7 @@ func (n *RuntimeJavascriptNakamaModule) groupUsersDemote(r *goja.Runtime) func(g
 // @param name(type=string) Search for groups that contain this value in their name.
 // @param langTag(type=string, optional=true) Filter based upon the entered language tag.
 // @param open(type=bool, optional=true) Filter based on whether groups are Open or Closed.
-// @param edgeCount(type=number, optional=true) Search groups with an equal or lower number of members in descending order.
+// @param edgeCount(type=number, optional=true) Search groups with an equal or lower number of members in descending order
 // @param limit(type=number, optional=true, default=100) Return only the required number of groups denoted by this limit value.
 // @param cursor(type=string, optional=true, default="") Pagination cursor from previous result. Don't set to start fetching from the beginning.
 // @return groups(nkruntime.GroupList) A list of groups.
@@ -8944,7 +8980,32 @@ func (n *RuntimeJavascriptNakamaModule) localcacheGet(r *goja.Runtime) func(goja
 			defVal = f.Argument(1)
 		}
 
-		value, found := n.localCache.Get(key)
+		var (
+			value  interface{}
+			found  bool
+			cacher *PeerCacher
+		)
+
+		direction := ParseCacheDirection(getJsCacheOption(r, f.Argument(2)).direction)
+		peer, ok := n.router.GetPeer()
+		if ok {
+			cacher = peer.GetCacher()
+		}
+
+		if direction == CacheDirectionLocalOnly || cacher == nil {
+			value, found = n.localCache.Get(key)
+		} else {
+			opts := make([]runtime.PeerCacheOption, 0)
+			if direction == CacheDirectionMemoryOnly {
+				opts = append(opts, runtime.WithMemoryOnly(true))
+			}
+
+			if v, err := cacher.Get(key, opts...); err == nil {
+				value = v
+				found = true
+			}
+		}
+
 		if !found {
 			return defVal
 		}
@@ -8982,8 +9043,37 @@ func (n *RuntimeJavascriptNakamaModule) localcachePut(r *goja.Runtime) func(goja
 			panic(r.NewTypeError("unsupported value type: must be string, numeric or boolean"))
 		}
 
-		n.localCache.Put(key, v, ttl)
+		var (
+			cacher *PeerCacher
+		)
+		peer, ok := n.router.GetPeer()
+		if ok {
+			cacher = peer.GetCacher()
+		}
 
+		op := getJsCacheOption(r, f.Argument(3))
+		direction := ParseCacheDirection(op.direction)
+		if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+			n.localCache.Put(key, v, ttl)
+			return goja.Undefined()
+		}
+
+		opts := make([]runtime.PeerCacheOption, 0)
+		if direction == CacheDirectionMemoryOnly {
+			opts = append(opts, runtime.WithMemoryOnly(true))
+		}
+
+		if len(op.tags) > 0 {
+			opts = append(opts, runtime.WithTags(op.tags))
+		}
+
+		if ttl > 0 {
+			opts = append(opts, runtime.WithExpiration(time.Second*time.Duration(ttl)))
+		}
+
+		if err := cacher.Set(key, v, opts...); err != nil {
+			panic(r.NewTypeError(err.Error()))
+		}
 		return goja.Undefined()
 	}
 }
@@ -8995,16 +9085,52 @@ func (n *RuntimeJavascriptNakamaModule) localcacheDelete(r *goja.Runtime) func(g
 			panic(r.NewTypeError("expects non empty key string"))
 		}
 
-		n.localCache.Delete(key)
+		var (
+			cacher *PeerCacher
+		)
+		peer, ok := n.router.GetPeer()
+		if ok {
+			cacher = peer.GetCacher()
+		}
 
+		op := getJsCacheOption(r, f.Argument(1))
+		direction := ParseCacheDirection(op.direction)
+		if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+			n.localCache.Delete(key)
+			return goja.Undefined()
+		}
+
+		if len(op.tags) > 0 {
+			if err := cacher.Invalidate(op.tags...); err != nil {
+				panic(r.NewTypeError(err.Error()))
+			}
+			return goja.Undefined()
+		}
+
+		if err := cacher.Delete(key); err != nil {
+			panic(r.NewTypeError(err.Error()))
+		}
 		return goja.Undefined()
 	}
 }
 
 func (n *RuntimeJavascriptNakamaModule) localcacheClear(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
 	return func(f goja.FunctionCall) goja.Value {
-		n.localCache.Clear()
+		var (
+			cacher *PeerCacher
+		)
+		peer, ok := n.router.GetPeer()
+		if ok {
+			cacher = peer.GetCacher()
+		}
 
+		op := getJsCacheOption(r, f.Argument(0))
+		direction := ParseCacheDirection(op.direction)
+		if !ok || cacher == nil || direction == CacheDirectionLocalOnly {
+			n.localCache.Clear()
+			return goja.Undefined()
+		}
+		cacher.Clear()
 		return goja.Undefined()
 	}
 }
@@ -9505,7 +9631,7 @@ func (n *RuntimeJavascriptNakamaModule) satoriPropertiesUpdate(r *goja.Runtime) 
 }
 
 // @group satori
-// @summary Publish events.
+// @summary Publish an events.
 // @param identifier(type=string) The identifier of the identity.
 // @param events(type=nkruntime.Event[]) An array of events to publish.
 // @param ip(type=string, optional=true, default="") An optional client IP address to pass on to Satori for geo-IP lookup.
@@ -10117,6 +10243,138 @@ func (n *RuntimeJavascriptNakamaModule) satoriMessageDelete(r *goja.Runtime) fun
 	}
 }
 
+func (n *RuntimeJavascriptNakamaModule) invokeMS(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return func(f goja.FunctionCall) goja.Value {
+		req := &api.AnyRequest{
+			Cid:     getJsString(r, f.Argument(0)),
+			Name:    getJsString(r, f.Argument(1)),
+			Header:  getJsStringMap(r, f.Argument(2)),
+			Query:   make(map[string]*api.AnyQuery),
+			Context: getJsStringMap(r, f.Argument(4)),
+			Body: &api.AnyRequest_StringContent{
+				StringContent: getJsString(r, f.Argument(5)),
+			},
+		}
+
+		m, ok := f.Argument(3).Export().(map[string]interface{})
+		if !ok {
+			panic(r.NewTypeError("expects object with string keys and values"))
+		}
+
+		for k, v := range m {
+			if s, ok := v.([]interface{}); ok {
+				req.Query[k] = &api.AnyQuery{Value: make([]string, 0, len(s))}
+				for _, vv := range s {
+					req.Query[k].Value = append(req.Query[k].Value, toString(vv))
+				}
+			}
+		}
+
+		peer, ok := n.router.GetPeer()
+		if !ok {
+			panic(r.NewTypeError("Service Unavailable"))
+		}
+
+		resp, err := peer.InvokeMS(context.Background(), req)
+		if err != nil {
+			panic(r.NewGoError(fmt.Errorf("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err.Error())))
+		}
+
+		result := make(map[string]interface{}, 2)
+		result["header"] = resp.GetHeader()
+		result["body"] = resp.GetStringContent()
+		return r.ToValue(result)
+	}
+}
+
+func (n *RuntimeJavascriptNakamaModule) sendMS(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return func(f goja.FunctionCall) goja.Value {
+		req := &api.AnyRequest{
+			Cid:     getJsString(r, f.Argument(0)),
+			Name:    getJsString(r, f.Argument(1)),
+			Header:  getJsStringMap(r, f.Argument(2)),
+			Query:   make(map[string]*api.AnyQuery),
+			Context: getJsStringMap(r, f.Argument(4)),
+			Body: &api.AnyRequest_StringContent{
+				StringContent: getJsString(r, f.Argument(5)),
+			},
+		}
+
+		m, ok := f.Argument(3).Export().(map[string]interface{})
+		if !ok {
+			panic(r.NewTypeError("expects object with string keys and values"))
+		}
+
+		for k, v := range m {
+			if s, ok := v.([]interface{}); ok {
+				req.Query[k] = &api.AnyQuery{Value: make([]string, 0, len(s))}
+				for _, vv := range s {
+					req.Query[k].Value = append(req.Query[k].Value, toString(vv))
+				}
+			}
+		}
+
+		peer, ok := n.router.GetPeer()
+		if !ok {
+			panic(r.NewTypeError("Service Unavailable"))
+		}
+
+		err := peer.SendMS(context.Background(), req)
+		if err != nil {
+			panic(r.NewGoError(fmt.Errorf("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err.Error())))
+		}
+		return r.ToValue(true)
+	}
+}
+
+func (n *RuntimeJavascriptNakamaModule) eventPeer(r *goja.Runtime) func(goja.FunctionCall) goja.Value {
+	return func(f goja.FunctionCall) goja.Value {
+		req := &api.AnyRequest{
+			Cid:     getJsString(r, f.Argument(0)),
+			Name:    getJsString(r, f.Argument(1)),
+			Header:  getJsStringMap(r, f.Argument(2)),
+			Query:   make(map[string]*api.AnyQuery),
+			Context: getJsStringMap(r, f.Argument(4)),
+			Body: &api.AnyRequest_StringContent{
+				StringContent: getJsString(r, f.Argument(5)),
+			},
+		}
+
+		m, ok := f.Argument(3).Export().(map[string]interface{})
+		if !ok {
+			panic(r.NewTypeError("expects object with string keys and values"))
+		}
+
+		for k, v := range m {
+			if s, ok := v.([]interface{}); ok {
+				req.Query[k] = &api.AnyQuery{Value: make([]string, 0, len(s))}
+				for _, vv := range s {
+					req.Query[k].Value = append(req.Query[k].Value, toString(vv))
+				}
+			}
+		}
+
+		names := make([]string, 0)
+		nameValues, ok := f.Argument(6).Export().([]interface{})
+		if ok {
+			for _, v := range nameValues {
+				names = append(names, toString(v))
+			}
+		}
+
+		peer, ok := n.router.GetPeer()
+		if !ok {
+			panic(r.NewTypeError("Service Unavailable"))
+		}
+
+		err := peer.Event(context.Background(), req, names...)
+		if err != nil {
+			panic(r.NewGoError(fmt.Errorf("Failed to invoke the remote service interface. Please check the network connection or service status. %s", err.Error())))
+		}
+		return r.ToValue(true)
+	}
+}
+
 func getJsString(r *goja.Runtime, v goja.Value) string {
 	s, ok := v.Export().(string)
 	if !ok {
@@ -10415,6 +10673,17 @@ func subscriptionToJsObject(subscription *api.ValidatedSubscription) map[string]
 	return validatedSubMap
 }
 
+func anyRequestToJsObject(in *api.AnyRequest) map[string]interface{} {
+	anyRequest := make(map[string]interface{}, 6)
+	anyRequest["cid"] = in.GetCid()
+	anyRequest["name"] = in.GetName()
+	anyRequest["header"] = in.GetHeader()
+	anyRequest["query"] = in.GetQuery()
+	anyRequest["context"] = in.GetContext()
+	anyRequest["body"] = in.GetStringContent()
+	return anyRequest
+}
+
 func jsObjectToPresenceStream(r *goja.Runtime, streamObj map[string]interface{}) PresenceStream {
 	stream := PresenceStream{}
 
@@ -10515,4 +10784,70 @@ func exportToSlice[S ~[]E, E any](v goja.Value) (S, error) {
 	}
 
 	return results, nil
+}
+
+func toString(value interface{}) string {
+	switch v := value.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case int8:
+		return strconv.Itoa(int(v))
+	case int32:
+		return strconv.FormatInt(int64(v), 10)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case uint:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		return strconv.FormatUint(v, 10)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', 4, 32)
+	case float64:
+		return strconv.FormatFloat(float64(v), 'f', 4, 64)
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	}
+	return ""
+}
+
+func getJsCacheOption(r *goja.Runtime, value goja.Value) struct {
+	direction string
+	tags      []string
+} {
+	op := struct {
+		direction string
+		tags      []string
+	}{
+		direction: "",
+		tags:      make([]string, 0),
+	}
+
+	if value == goja.Undefined() || value == goja.Null() {
+		return op
+	}
+
+	opts, ok := value.Export().(map[string]interface{})
+	if !ok {
+		panic(r.NewTypeError("expects string"))
+	}
+
+	if m, ok := opts["direction"]; ok {
+		op.direction = toString(m)
+	}
+
+	if m, ok := opts["tags"]; ok {
+		if values, ok := m.([]interface{}); ok {
+			op.tags = make([]string, len(values))
+			for k, v := range values {
+				op.tags[k] = toString(v)
+			}
+		}
+	}
+	return op
 }

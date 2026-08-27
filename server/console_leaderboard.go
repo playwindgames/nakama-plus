@@ -21,10 +21,11 @@ import (
 	"encoding/gob"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/doublemo/nakama-kit/kit"
 	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -51,16 +52,29 @@ func (s *ConsoleServer) ListLeaderboards(ctx context.Context, in *console.Leader
 
 	leaderboards, total, newCursor := s.leaderboardCache.ListAll(100, true, cursor)
 
+	var serviceRegistry kit.Service
+	if peer, ok := s.router.GetPeer(); ok {
+		if m, ok := peer.GetServiceRegistry().Get(kit.SERVICE_NAME); ok {
+			serviceRegistry = m
+		}
+	}
+
 	resultList := make([]*console.Leaderboard, 0, len(leaderboards))
 	for _, l := range leaderboards {
-		resultList = append(resultList, &console.Leaderboard{
+		item := &console.Leaderboard{
 			Id:            l.Id,
 			SortOrder:     uint32(l.SortOrder),
 			Operator:      uint32(l.Operator),
 			ResetSchedule: l.ResetScheduleStr,
 			Authoritative: l.Authoritative,
 			Tournament:    l.IsTournament(),
-		})
+			Node:          "",
+		}
+
+		if serviceRegistry != nil {
+			item.Node = serviceRegistry.GetNodeByByHashRing(item.Id)
+		}
+		resultList = append(resultList, item)
 	}
 	response := &console.LeaderboardList{
 		Leaderboards: resultList,
@@ -193,6 +207,9 @@ func (s *ConsoleServer) DeleteLeaderboard(ctx context.Context, in *console.Leade
 		return nil, status.Error(codes.Internal, "Error deleting leaderboard.")
 	}
 
+	if peer, ok := s.router.GetPeer(); ok {
+		peer.LeaderboardRemove(in.Id)
+	}
 	return &emptypb.Empty{}, nil
 }
 
@@ -207,9 +224,10 @@ func (s *ConsoleServer) DeleteLeaderboardRecord(ctx context.Context, in *console
 		return nil, status.Error(codes.NotFound, "Leaderboard not found.")
 	}
 
+	peer, _ := s.router.GetPeer()
 	if l.IsTournament() {
 		// Pass uuid.Nil as userID to bypass leaderboard Authoritative check.
-		err := TournamentRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, uuid.Nil, in.Id, in.OwnerId)
+		err := TournamentRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, uuid.Nil, in.Id, in.OwnerId)
 		if err == runtime.ErrTournamentNotFound {
 			return nil, status.Error(codes.NotFound, "Tournament not found.")
 		} else if err != nil {
@@ -217,7 +235,7 @@ func (s *ConsoleServer) DeleteLeaderboardRecord(ctx context.Context, in *console
 		}
 	} else {
 		// Pass uuid.Nil as userID to bypass leaderboard Authoritative check.
-		err := LeaderboardRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, uuid.Nil, in.Id, in.OwnerId)
+		err := LeaderboardRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, uuid.Nil, in.Id, in.OwnerId)
 		if err == ErrLeaderboardNotFound {
 			return nil, status.Error(codes.NotFound, "Leaderboard not found.")
 		} else if err != nil {

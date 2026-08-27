@@ -16,11 +16,10 @@ package server
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -224,7 +223,7 @@ func (s *ApiServer) GetSubscription(ctx context.Context, in *api.GetSubscription
 
 	sub, err := GetSubscriptionByProductId(ctx, logger, s.db, userID.String(), in.ProductId)
 	if err != nil {
-		if errors.Is(err, ErrSubscriptionNotFound) {
+		if err == ErrSubscriptionNotFound {
 			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		return nil, err

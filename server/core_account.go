@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/gofrs/uuid/v5"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -762,7 +762,7 @@ WHERE u.id = $1`
 	return account, nil
 }
 
-func DeleteAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, config Config, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, tracker Tracker, userID uuid.UUID, recorded bool) error {
+func DeleteAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, config Config, leaderboardCache LeaderboardCache, leaderboardRankCache LeaderboardRankCache, sessionRegistry SessionRegistry, sessionCache SessionCache, tracker Tracker, peer Peer, userID uuid.UUID, recorded bool) error {
 	if userID == uuid.Nil {
 		return errors.New("cannot delete the system user")
 	}
@@ -780,7 +780,7 @@ func DeleteAccount(ctx context.Context, logger *zap.Logger, db *sql.DB, config C
 			return nil
 		}
 
-		err = LeaderboardRecordsDeleteAll(ctx, logger, leaderboardCache, leaderboardRankCache, tx, userID, ts)
+		err = LeaderboardRecordsDeleteAll(ctx, logger, leaderboardCache, leaderboardRankCache, peer, tx, userID, ts)
 		if err != nil {
 			logger.Debug("Could not delete leaderboard records.", zap.Error(err), zap.String("user_id", userID.String()))
 			return err

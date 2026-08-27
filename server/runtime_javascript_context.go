@@ -77,6 +77,7 @@ func NewRuntimeJsContext(r *goja.Runtime, node, version string, env goja.Value, 
 	if clientPort != "" {
 		_ = ctxObj.Set(__RUNTIME_JAVASCRIPT_CTX_CLIENT_PORT, clientPort)
 	}
+
 	if traceID != "" {
 		_ = ctxObj.Set(__RUNTIME_JAVASCRIPT_CTX_TRACE_ID, traceID)
 	}

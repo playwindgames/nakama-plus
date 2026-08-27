@@ -27,18 +27,17 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/doublemo/nakama-plus/v3/console"
+	"github.com/doublemo/nakama-plus/v3/console/acl"
+	"github.com/doublemo/nakama-plus/v3/internal/satori"
 	"github.com/gofrs/uuid/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	grpcgw "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/doublemo/nakama-plus/v3/console"
-	"github.com/doublemo/nakama-plus/v3/console/acl"
-	"github.com/doublemo/nakama-plus/v3/internal/satori"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -239,6 +238,8 @@ func StartConsoleServer(logger *zap.Logger, startupLogger *zap.Logger, db *sql.D
 		grpcGatewayRouter.HandleFunc(endpoint, handler)
 		logger.Info("Registered endpoint for Google subscription notifications callback", zap.String("endpoint", endpoint))
 	}
+
+	// TODO: Register Huawei callbacks
 
 	// pprof routes
 	grpcGatewayRouter.Handle("/debug/pprof/", adminBasicAuth(config.GetConsole())(http.HandlerFunc(pprof.Index)))
@@ -459,9 +460,7 @@ func registerDashboardHandlers(logger *zap.Logger, router *mux.Router) error {
 		return err
 	}
 	_ = indexFile.Close()
-	indexHTMLStr := string(indexBytes)
-	indexHTMLStr = strings.ReplaceAll(indexHTMLStr, "{{nt}}", strconv.FormatBool(console.UIFS.Nt))
-	indexBytes = []byte(indexHTMLStr)
+	indexBytes = []byte(indexBytes)
 
 	indexFn := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Cache-Control", "no-cache")
@@ -479,24 +478,22 @@ func registerDashboardHandlers(logger *zap.Logger, router *mux.Router) error {
 			isAsset = true
 
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-
-			if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-				if strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") {
-					w.Header().Set("Content-Encoding", "gzip")
-
-					if strings.HasSuffix(path, ".css") {
-						w.Header().Set("Content-Type", "text/css")
-					} else {
-						w.Header().Set("Content-Type", "application/javascript")
-					}
-
-					path = path + ".gz"
-				}
-			}
+			// if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			// 	if strings.HasSuffix(path, ".css") || strings.HasSuffix(path, ".js") {
+			// 		w.Header().Set("Content-Encoding", "gzip")
+			// 		if strings.HasSuffix(path, ".css") {
+			// 			w.Header().Set("Content-Type", "text/css")
+			// 		} else {
+			// 			w.Header().Set("Content-Type", "application/javascript")
+			// 		}
+			// 		path = path + ".gz"
+			// 	}
+			// }
 		}
 
 		// check whether a file exists at the given path
-		if _, err := console.UIFS.Open(path); err == nil {
+		if fs, err := console.UIFS.Open(path); err == nil {
+			defer fs.Close()
 			// otherwise, use http.FileServer to serve the static dir
 			r.URL.Path = path // override the path with the prefixed path
 			console.UI.ServeHTTP(w, r)
@@ -507,7 +504,6 @@ func registerDashboardHandlers(logger *zap.Logger, router *mux.Router) error {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-
 			indexFn(w, r)
 		}
 	})

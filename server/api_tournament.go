@@ -23,9 +23,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -64,7 +64,8 @@ func (s *ApiServer) DeleteTournamentRecord(ctx context.Context, in *api.DeleteTo
 		return nil, status.Error(codes.InvalidArgument, "Invalid tournament ID.")
 	}
 
-	if err := TournamentRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, in.TournamentId, userID.String()); err != nil {
+	peer, _ := s.router.GetPeer()
+	if err := TournamentRecordDelete(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, userID, in.TournamentId, userID.String()); err != nil {
 		switch err {
 		case ErrLeaderboardNotFound:
 			return nil, status.Error(codes.NotFound, "Tournament not found.")
@@ -117,8 +118,8 @@ func (s *ApiServer) JoinTournament(ctx context.Context, in *api.JoinTournamentRe
 	}
 
 	tournamentID := in.GetTournamentId()
-
-	if err := TournamentJoin(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, username, tournamentID); err != nil {
+	peer, _ := s.router.GetPeer()
+	if err := TournamentJoin(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, userID, username, tournamentID); err != nil {
 		switch {
 		case errors.Is(err, runtime.ErrTournamentNotFound):
 			return nil, status.Error(codes.NotFound, "Tournament not found.")
@@ -197,11 +198,11 @@ func (s *ApiServer) ListTournamentRecords(ctx context.Context, in *api.ListTourn
 	}
 
 	recordList, err := TournamentRecordsList(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, in.GetTournamentId(), in.OwnerIds, limit, in.Cursor, overrideExpiry)
-	if errors.Is(err, runtime.ErrTournamentNotFound) {
+	if err == runtime.ErrTournamentNotFound {
 		return nil, status.Error(codes.NotFound, "Tournament not found.")
-	} else if errors.Is(err, runtime.ErrTournamentOutsideDuration) {
+	} else if err == runtime.ErrTournamentOutsideDuration {
 		return nil, status.Error(codes.NotFound, "Tournament has ended.")
-	} else if errors.Is(err, ErrLeaderboardInvalidCursor) {
+	} else if err == ErrLeaderboardInvalidCursor {
 		return nil, status.Error(codes.InvalidArgument, "Cursor is invalid or expired.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error listing records from tournament.")
@@ -361,7 +362,8 @@ func (s *ApiServer) WriteTournamentRecord(ctx context.Context, in *api.WriteTour
 		return nil, status.Error(codes.NotFound, "Tournament not found or has ended.")
 	}
 
-	record, err := TournamentRecordWrite(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, userID, in.GetTournamentId(), userID, username, in.GetRecord().GetScore(), in.GetRecord().GetSubscore(), in.GetRecord().GetMetadata(), in.GetRecord().GetOperator())
+	peer, _ := s.router.GetPeer()
+	record, err := TournamentRecordWrite(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, peer, userID, in.GetTournamentId(), userID, username, in.GetRecord().GetScore(), in.GetRecord().GetSubscore(), in.GetRecord().GetMetadata(), in.GetRecord().GetOperator())
 	if err != nil {
 		switch err {
 		case runtime.ErrTournamentMaxSizeReached:
@@ -444,7 +446,7 @@ func (s *ApiServer) ListTournamentRecordsAroundOwner(ctx context.Context, in *ap
 	}
 
 	records, err := TournamentRecordsHaystack(ctx, logger, s.db, s.leaderboardCache, s.leaderboardRankCache, in.GetTournamentId(), in.Cursor, ownerID, limit, overrideExpiry)
-	if errors.Is(err, ErrLeaderboardNotFound) {
+	if err == ErrLeaderboardNotFound {
 		return nil, status.Error(codes.NotFound, "Tournament not found.")
 	} else if err != nil {
 		return nil, status.Error(codes.Internal, "Error querying records from leaderboard.")

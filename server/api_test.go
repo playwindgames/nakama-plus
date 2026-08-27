@@ -28,11 +28,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
 	"github.com/doublemo/nakama-plus/v3/apigrpc"
+	"github.com/gofrs/uuid/v5"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -68,6 +68,10 @@ func (d *DummyMessageRouter) SendToPresenceIDs(*zap.Logger, []*PresenceID, *rtap
 }
 func (d *DummyMessageRouter) SendToStream(*zap.Logger, PresenceStream, *rtapi.Envelope, bool) {}
 func (d *DummyMessageRouter) SendToAll(*zap.Logger, *rtapi.Envelope, bool)                    {}
+func (d *DummyMessageRouter) SetPeer(peer Peer)                                               {}
+func (d *DummyMessageRouter) GetPeer() (Peer, bool) {
+	return nil, false
+}
 
 type DummySession struct {
 	messages []*rtapi.Envelope

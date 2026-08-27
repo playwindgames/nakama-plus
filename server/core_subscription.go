@@ -29,10 +29,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/api"
 	"github.com/doublemo/nakama-common/runtime"
 	"github.com/doublemo/nakama-plus/v3/iap"
+	"github.com/gofrs/uuid/v5"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -846,6 +846,8 @@ func appleNotificationHandler(logger *zap.Logger, db *sql.DB, purchaseNotificati
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+
+		logger.Debug("Apple IAP notification received", zap.Any("notification_payload", notificationData))
 
 		switch notificationType := strings.ToUpper(notificationPayload.NotificationType); notificationType {
 		case "DID_RENEW", "SUBSCRIBED", "DID_CHANGE_RENEWAL_PREF", "OFFER_REDEEMED":

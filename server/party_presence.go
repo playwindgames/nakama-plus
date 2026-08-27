@@ -18,9 +18,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/gofrs/uuid/v5"
 	"github.com/doublemo/nakama-common/rtapi"
 	"github.com/doublemo/nakama-common/runtime"
+	"github.com/gofrs/uuid/v5"
 )
 
 type PartyPresenceList struct {
