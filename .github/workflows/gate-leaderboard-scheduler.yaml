@@ -1,0 +1,199 @@
+# 排行榜调度器回归门禁 —— 待 P0（fork 落地方式）定下后放进
+# `playwindgames/nakama-plus` 的 `.github/workflows/`。
+#
+# ## 为什么单独加一个 workflow，而不是靠现成的 tests.yaml
+#
+# fork 已有 `tests.yaml`，它跑 `docker compose -f docker-compose-tests.yml up`，
+# 里面既起了 postgres:16.8-alpine、又设了 `TEST_DB_URL`，还跑 `nakama migrate up`
+# 建真表 —— 也就是说**集成层用例在那条路径上本来就会跑**，而且是高保真的。
+#
+# 它盖不住的是这三处：
+#
+# 1. **它只在 `pull_request` 上触发。** 我方 fork 现有 2 个提交都是**直推 main** 的
+#    ⇒ 那样门禁根本不会跑。本 workflow 因此同时监听 `push`。
+#    ⚠️ 这是真正的缺口 —— 不是「没有带库的门禁」，而是**只有 PR 路径有**。
+# 2. **它证明不了「测试还有牙」。** 普通测试跑绿只说明当前代码没坏；断言被改松、
+#    或测试因重构而静默失效，`go test` 照样绿。上游 #2476 自带的
+#    `leaderboard_scheduler_test.go` 就是活例子 —— 第一行是
+#    `t.Skip("auxiliary test for scheduling logic, but too finicky to be part of
+#    the test suite")`，写了、关掉了、CI 里从不运行，于是 #2476 自己引入的
+#    ID 集合回归无人发现。**突变检查才是防这一条的。**
+# 3. **它要先 build 整个 nakama 镜像**，一轮好几分钟。本 workflow 的单元层
+#    十几秒就能给出信号，适合每次 push 都跑。
+#
+# ## 两层，两个必跑 job
+#
+# | job           | 外部依赖              | 覆盖                                   |
+# | ------------- | --------------------- | -------------------------------------- |
+# | `unit`        | 无库、无 docker、无网 | 除 tournament 裸 SQL 外的全部调度器用例 + 锁序检查 + 突变检查 |
+# | `integration` | postgres 服务容器     | `invokeCallback` 的 tournament 分支（reset 与**发奖链**） |
+#
+# 划分依据是**该用例能否在无外部依赖下运行**，不是「重要不重要」——
+# 发奖链恰恰是后果最重的一条，它属于集成层不代表它可以没有门禁。
+#
+# ## 依赖
+#
+# 需要把这几样一并放进 fork（建议 `scripts/leaderboard/`）：
+#   tools/scheduler-regression.sh
+#   tools/mutate-scheduler-fixes.py
+#   tools/leaderboard-test-schema.sql
+#   tools/check-lock-order.go              ← 回归套件第 2 步
+#   tools/check-lock-order-selftest.sh     ← 检查器自身的突变检查
+#   tools/testdata-lock-order/**           ← 上面那条的夹具
+#
+# ## 注意
+#
+# `-vet=off` 不是我们的怪癖：fork 既有代码 `runtime_go_nakama.go:4543` 会触发
+# Go 1.25 新增的 impossible type assertion 检查，与本补丁无关，`go build` 不受影响。
+# 上游自己的 `docker-compose-tests.yml` 用的也是 `go test -vet=off`。
+
+name: Leaderboard scheduler regression
+
+# ⚠️ paths 必须**同时包含被测代码与测试设施本身** ——
+# 只列 server/*.go 的话，改 scheduler-regression.sh / mutate-scheduler-fixes.py
+# 或本 workflow 自己时门禁不跑，而「测试还有牙」恰恰是靠那两个脚本。
+# ⚠️ 两份 paths 是**故意重复**的：GitHub Actions 不支持 YAML 锚点
+# （`&anchor` / `*alias`），写了不会生效。改动时两处都要改。
+on:
+  pull_request:
+    paths:
+      # ⚠️ main.go 也要列：第 2 步会断言 Start() 仍夹在 NewRuntime 与
+      #    NewLocalPeer 之间（design.md D14 / tasks 5.6）。它一改就得重跑。
+      - 'main.go'
+      - 'server/leaderboard_scheduler.go'
+      - 'server/leaderboard_scheduler_test.go'
+      - 'server/core_tournament.go'
+      - 'server/core_tournament_test.go'
+      - 'server/leaderboard_cache.go'
+      # ⚠️ 锁序检查扫的是**整个 server 包** —— 任何文件里新增「持锁调 Update()」
+      #    都该让它红。但把 paths 写成 server/**.go 会让门禁几乎每次都跑，
+      #    与「秒级信号」的定位冲突。折中：只列已知会调 Update() 的文件。
+      #    🔴 代价是**新文件**里的违规会漏掉，直到它碰到上面任一文件。
+      #    这条限制是有意接受的，不是疏忽。
+      - 'server/peer_binary_log.go'
+      - 'server/runtime_go_nakama.go'
+      - 'server/runtime_lua_nakama.go'
+      - 'server/runtime_javascript_nakama.go'
+      - 'scripts/leaderboard/**'
+      - '.github/workflows/gate-leaderboard-scheduler.yaml'
+  push:
+    # ⚠️ 直推也要跑 —— 否则绕过 PR 就等于绕过门禁
+    paths:
+      # ⚠️ main.go 也要列：第 2 步会断言 Start() 仍夹在 NewRuntime 与
+      #    NewLocalPeer 之间（design.md D14 / tasks 5.6）。它一改就得重跑。
+      - 'main.go'
+      - 'server/leaderboard_scheduler.go'
+      - 'server/leaderboard_scheduler_test.go'
+      - 'server/core_tournament.go'
+      - 'server/core_tournament_test.go'
+      - 'server/leaderboard_cache.go'
+      # ⚠️ 锁序检查扫的是**整个 server 包** —— 任何文件里新增「持锁调 Update()」
+      #    都该让它红。但把 paths 写成 server/**.go 会让门禁几乎每次都跑，
+      #    与「秒级信号」的定位冲突。折中：只列已知会调 Update() 的文件。
+      #    🔴 代价是**新文件**里的违规会漏掉，直到它碰到上面任一文件。
+      #    这条限制是有意接受的，不是疏忽。
+      - 'server/peer_binary_log.go'
+      - 'server/runtime_go_nakama.go'
+      - 'server/runtime_lua_nakama.go'
+      - 'server/runtime_javascript_nakama.go'
+      - 'scripts/leaderboard/**'
+      - '.github/workflows/gate-leaderboard-scheduler.yaml'
+
+jobs:
+  unit:
+    name: 单元层（无库、无 docker、秒级）+ 锁序 + 突变检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # 先验「检查器本身还有牙」，再拿它去验代码。顺序是有意的：
+      # 一个从没红过的检查器，和一个 `exit 0` 的空脚本，在 CI 里长得一模一样 ——
+      # 这正是上游那条 t.Skip 掉的测试的翻版。
+      - name: 检查器自检（夹具：defer / 闭包 / 跨函数 / 接口 / 环 / main.go 顺序）
+        run: ./scripts/leaderboard/check-lock-order-selftest.sh
+
+      # 这一层的前提就是「无数据库、无 docker、秒级」——
+      # 所以本 job 刻意不起任何服务。若将来有人给调度器单测引入了 DB 依赖，
+      # 这里会直接失败，这是有意的。
+      - name: 回归套件（含锁序 + main.go 顺序检查）+ 突变检查
+        run: ./scripts/leaderboard/scheduler-regression.sh . --mutate
+
+      # 突变检查会反复改写源文件后还原。万一脚本中途被打断，
+      # 这一步能让污染立刻可见，而不是被带进后续构建。
+      - name: 确认工作区已还原
+        if: always()
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::突变检查后工作区未还原，源文件被污染："
+            git diff --stat
+            exit 1
+          fi
+
+  integration:
+    name: 集成层（真库：reset 与发奖链）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      # 与上游 docker-compose-tests.yml 同一个版本，免得两条路径的库行为不一致。
+      postgres:
+        image: postgres:16.8-alpine
+        env:
+          POSTGRES_PASSWORD: localdb
+          POSTGRES_DB: lbschedtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d lbschedtest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      TEST_DB_URL: postgresql://postgres:localdb@localhost:5432/lbschedtest?sslmode=disable
+      # 🔴 关键：让「连不上库」从 t.Skip 变成硬失败。
+      # 不设它的话，URL 配错 / 服务容器没起来 / 密码改了 —— 任何一种都会让这三条
+      # 用例安静跳过，而 job 照样绿。它们覆盖的正是 reset 与**发奖链**。
+      TEST_DB_REQUIRED: '1'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # DDL 与本地 setup-test-db.sh 共用同一份文件，两边不会漂移。
+      - name: 建表
+        run: psql "$TEST_DB_URL" -v ON_ERROR_STOP=1 -f scripts/leaderboard/leaderboard-test-schema.sql
+
+      - name: 跑集成层用例
+        run: |
+          go test -vet=off -race ./server/ -count=1 -v \
+            -run 'TestLeaderboardSchedulerInvokeCallbackTournament|TestLeaderboardSchedulerInvokeCallbackMissingRow' \
+            2>&1 | tee /tmp/integration.log
+
+      # TEST_DB_REQUIRED 挡住了「跳过」，这一步挡的是另一种沉默失败：
+      # -run 正则写错 / 用例被改名 ⇒ 一条都没匹配到 ⇒ go test 报 ok ⇒ job 绿。
+      # 「没跑」和「跑过了」在退出码上长得一模一样。
+      - name: 确认三条用例确实跑了
+        run: |
+          passed=$(grep -c '^--- PASS' /tmp/integration.log || true)
+          skipped=$(grep -c '^--- SKIP' /tmp/integration.log || true)
+          echo "PASS=$passed SKIP=$skipped"
+          if [ "$skipped" != "0" ]; then
+            echo "::error::有用例被跳过 —— TEST_DB_REQUIRED 应当阻止这种情况，请查环境"
+            exit 1
+          fi
+          if [ "$passed" -lt 3 ]; then
+            echo "::error::只有 $passed 条用例通过，期望至少 3 条（reset / end 发奖 / 榜已删的容错）。"
+            echo "::error::多半是 -run 正则没匹配上 —— 用例改名了？"
+            exit 1
+          fi
