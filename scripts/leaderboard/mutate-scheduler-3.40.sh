@@ -48,7 +48,13 @@ mutate "M2 第二处 fnCanRun（tournament end 路径）" \
 mutate "M3 fail-closed 反转（服务注册表取不到时应 return false）" \
   's/^\(\s*\)return false$/\1return true/' 'FnCanRunBranches'
 
-# M4 需 #2538 已套用（Task 11 之后），届时取消下一行注释：
-# mutate "M4 #2538 守卫" 's/if expiry > 0 && nowUnix < expiry {/if expiry > 0 {/' 'EndedTournamentHides'
+# M4：#2538 的守卫。L6 套用后启用。
+#
+# 🔴 它同时承担 Task 11 Step 4 的「确认走到了目标分支」——
+#    原计划用 grep 测试输出里的调度器日志来确认，实测恒为 0：P28 探针用的是
+#    zap.NewNop()，Debug 日志根本不产生。突变才是可靠的手段：把守卫改回去，
+#    S2 必须红；不红就说明 S2 根本没走到那个分支，是假绿。
+mutate "M4 #2538 守卫（同时确认 S2 走到了目标分支）" \
+  's/if expiry > 0 && nowUnix < expiry {/if expiry > 0 {/' 'EndedTournamentHides'
 
 echo "全部突变点确认有效。"

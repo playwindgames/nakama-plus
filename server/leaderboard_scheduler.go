@@ -322,7 +322,7 @@ func (ls *LocalLeaderboardScheduler) computeNext(now time.Time) (endActiveTs, ex
 					}
 				}
 
-				if expiry > 0 {
+				if expiry > 0 && nowUnix < expiry {
 					if expiryTs < 0 || expiry < expiryTs {
 						expiryTs = expiry
 						expiryIds = []string{l.Id}
