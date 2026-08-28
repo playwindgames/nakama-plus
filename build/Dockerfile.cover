@@ -1,0 +1,48 @@
+# 覆盖率插桩构建 —— 仅用于 P-V 的覆盖面采集，不入补丁栈。
+#
+# 与 build/Dockerfile.local 的差异只有三处，其余逐行对齐（含 golang 镜像的精确
+# tag 与 gcc/libc6-dev）—— 差一点工具链，测出来的差异就归因不到 3.40：
+#   1. go build 加 -cover
+#   2. 运行时建 /covdata
+#   3. ENV GOCOVERDIR=/covdata
+#
+# 🔴 覆盖计数器只在**进程退出时**写盘。取数据前必须先 docker compose stop，
+#    否则目录里只有 covmeta.*，covdata 会算出 0% 且不报错。
+
+FROM golang:1.26.5-bookworm AS builder
+
+ENV GOOS=linux
+ENV CGO_ENABLED=1
+
+RUN apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends ca-certificates gcc libc6-dev
+
+WORKDIR /go/build/nakama
+
+COPY . .
+
+# 🔴 -cover 是关键。少了它进程照常跑、GOCOVERDIR 照常建，但一个字节都不会写。
+RUN go build -cover -o /go/build-out/nakama -trimpath -mod=vendor -gcflags "-trimpath $PWD" -asmflags "-trimpath $PWD" -ldflags "-s -w -X main.version=cover"
+
+FROM debian:bookworm-slim
+
+LABEL variant=nakama-cover
+LABEL description="P-V 覆盖率插桩构建，非生产用途"
+
+RUN mkdir -p /nakama/data/modules /covdata && \
+    apt-get update && \
+    apt-get -y upgrade && \
+    apt-get install -y --no-install-recommends ca-certificates tzdata iproute2 tini && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /nakama/
+COPY --from=builder "/go/build-out/nakama" /nakama/
+ENV GOCOVERDIR=/covdata
+EXPOSE 7349 7350 7351
+
+ENTRYPOINT ["tini", "--", "/nakama/nakama"]
+
+HEALTHCHECK --interval=30s --timeout=10s \
+  CMD /nakama/nakama healthcheck || exit 1
