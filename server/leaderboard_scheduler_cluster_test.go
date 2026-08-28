@@ -1187,3 +1187,82 @@ func TestLeaderboardSchedulerStopCancelsAll(t *testing.T) {
 	case <-time.After(2 * time.Second):
 	}
 }
+
+// spec D9 的观测契约由本测试守着，而不是靠一次性 grep 测试输出 ——
+// 测试用的是 Nop logger 或 Warn 级 observer，Debug 日志根本不会出现在输出里，
+// grep 恒为 0，看起来像「信号没加上」。
+//
+// Task 12 的「不重不漏」判据完全建立在这两条信号上，它们消失必须立刻可见。
+func TestLeaderboardSchedulerEmitsObservabilitySignals(t *testing.T) {
+	t.Run("定时器侧：含可判正负的 expiry_in", func(t *testing.T) {
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+		cache := newTestLeaderboardCache(logger)
+		now := time.Now().UTC().Unix()
+		cache.Insert("obs", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+		ls := newTestScheduler(logger, cache)
+		ls.config = cfg
+		ls.fnLeaderboardReset = func(context.Context, *api.Leaderboard, int64) error { return nil }
+		ls.fnTournamentEnd = func(context.Context, *api.Tournament, int64, int64) error { return nil }
+		defer stopTestScheduler(ls)
+
+		ls.Start(&Runtime{peer: &uberatomic.Value{}})
+
+		var entries []observer.LoggedEntry
+		for i := 0; i < 40; i++ {
+			entries = logs.FilterMessage("Setting timer to run leaderboard hooks").All()
+			if len(entries) > 0 {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		require.NotEmpty(t, entries,
+			"定时器侧信号缺失 —— 形态 1 / 形态 2 的鉴别靠它，Task 12 也依赖它")
+
+		fields := entries[0].ContextMap()
+		require.Contains(t, fields, "expiry_ids", "ID 集合完整性靠 ids 数组")
+		require.Contains(t, fields, "end_active_ids")
+		// 🔴 必须是可判正负的量。时间戳永远为正，鉴别不了「定时器从未武装」。
+		require.Contains(t, fields, "expiry_in",
+			"expiry_in 是 Duration，负值 = 目标时刻已过去 = 定时器从未武装；"+
+				"只有时间戳字段的话这个判据就没了")
+		require.IsType(t, time.Duration(0), fields["expiry_in"])
+	})
+
+	t.Run("执行侧：谁执行了", func(t *testing.T) {
+		core, logs := observer.New(zapcore.DebugLevel)
+		logger := zap.New(core)
+		cache := newTestLeaderboardCache(logger)
+		now := time.Now().UTC().Unix()
+		cache.Insert("plain", true, 0, 0, "0 0 1 1 *", "{}", now, false)
+
+		ls := newTestScheduler(logger, cache)
+		ls.ctx, ls.ctxCancelFn = context.WithCancel(context.Background())
+		ls.fnCanRun = func(string) bool { return true } // 本节点负责
+		defer func() { ls.ctxCancelFn(); stopTestScheduler(ls) }()
+
+		invoked := make(chan struct{}, 1)
+		ls.fnLeaderboardReset = func(context.Context, *api.Leaderboard, int64) error {
+			invoked <- struct{}{}
+			return nil
+		}
+
+		go ls.invokeCallback()
+		ls.queue <- &LeaderboardSchedulerCallback{
+			id: "plain", leaderboard: cache.Get("plain"), ts: now, t: time.Unix(now-1, 0).UTC(),
+		}
+
+		select {
+		case <-invoked:
+		case <-time.After(2 * time.Second):
+			t.Fatal("回调未执行，本子测试的前提不成立")
+		}
+
+		entries := logs.FilterMessage("Leaderboard callback accepted by this node").All()
+		require.Len(t, entries, 1,
+			"执行侧信号缺失 —— 定时器侧证明不了「谁执行了」，"+
+				"集群里每个节点看同一个库、算出的 ID 集合是一样的")
+		require.Equal(t, "plain", entries[0].ContextMap()["leaderboard_id"])
+	})
+}

@@ -228,6 +228,18 @@ func (ls *LocalLeaderboardScheduler) scheduleLoop() {
 			zap.Int("expiry_count", len(expiryIds)),
 		)
 
+		// 集群验收所依赖的定时器侧信号（spec D9）。3.40 删掉了 3.38 血统里的
+		// "Setting timer to run end active/expiry" 两行，而形态 1 / 形态 2 的鉴别
+		// 靠的正是 expiry 的 **Duration 符号**（负 = 目标时刻已过去 = 定时器从未武装），
+		// 时间戳字段不会是负数、判别不了。ID 集合完整性靠 ids 数组，也一并加回。
+		ls.logger.Debug("Setting timer to run leaderboard hooks",
+			zap.Int64("end_active_ts", endActiveTs),
+			zap.Strings("end_active_ids", endActiveIds),
+			zap.Int64("expiry_ts", expiryTs),
+			zap.Strings("expiry_ids", expiryIds),
+			zap.Duration("expiry_in", time.Unix(expiryTs, 0).UTC().Sub(now)),
+		)
+
 		if wakeTs < 0 {
 			// Nothing to schedule, block until Update() signals or context is cancelled.
 			select {
@@ -401,6 +413,13 @@ func (ls *LocalLeaderboardScheduler) invokeCallback() {
 				if ok := ls.fnCanRun(callback.leaderboard.Id); !ok {
 					continue
 				}
+				// 执行侧信号（spec D9）。定时器侧信号证明不了「谁执行了」——
+				// 集群里每个节点看同一个库、算出的 ID 集合是一样的。
+				// 而 invokeCallback 的成功路径此前不打任何日志（只有失败才有 Warn）。
+				// Task 12 的「不重不漏」判据建立在这条上，两处用同一个 message
+				// 便于按节点聚合做集合运算。
+				ls.logger.Debug("Leaderboard callback accepted by this node",
+					zap.String("leaderboard_id", callback.leaderboard.Id))
 
 				if callback.leaderboard.IsTournament() {
 					// Tournament, fetch most up-to-date info for size etc.
@@ -449,6 +468,8 @@ WHERE id = $1`
 				if ok := ls.fnCanRun(callback.id); !ok {
 					continue
 				}
+				ls.logger.Debug("Leaderboard callback accepted by this node",
+					zap.String("leaderboard_id", callback.id))
 
 				query := `SELECT
 id, sort_order, operator, reset_schedule, metadata, create_time,
