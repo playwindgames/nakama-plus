@@ -1,0 +1,56 @@
+framework_writes:
+  console_acl_template:
+  - console_template.go
+  console_audit_log:
+  - console_audit.go
+  console_user:
+  - console_authenticate.go
+  - console_user.go
+  group_edge:
+  - console_group.go
+  - core_group.go
+  groups:
+  - core_group.go
+  leaderboard:
+  - core_leaderboard.go
+  - core_tournament.go
+  - leaderboard_cache.go
+  - leaderboard_scheduler.go
+  - leaderboard_scheduler_cluster_test.go
+  leaderboard_record:
+  - core_leaderboard.go
+  - core_tournament.go
+  message:
+  - console_group.go
+  - core_channel.go
+  - core_group.go
+  notification:
+  - core_notification.go
+  purchase:
+  - core_purchase.go
+  setting:
+  - console_setting.go
+  storage:
+  - core_account.go
+  - core_storage.go
+  user_device:
+  - console_account.go
+  - core_account.go
+  - core_authenticate.go
+  - core_link.go
+  user_edge:
+  - core_authenticate.go
+  - core_friend.go
+  user_tombstone:
+  - core_account.go
+  users:
+  - api_test.go
+  - console_account.go
+  - console_config.go
+  - console_unlink.go
+  - core_account.go
+  users_notes:
+  - console_account.go
+  wallet_ledger:
+  - core_wallet.go
+
