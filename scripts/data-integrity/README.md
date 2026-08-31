@@ -85,6 +85,12 @@ python3 check.py compare --dsn-cmd "$DSN" \
   是**待证伪的假设**而不是证明 —— 它报「非空」时，结论是
   「发现了未知写入路径」，不是「检查器坏了」。
 - **断言只覆盖 yaml 里写下来的那几条。** 没写下来的不变量，工具不知道它存在。
+- **真实数据里有 ~1MB 的单字段。** `storage` 的 `config-<版本>` 是服务端启动时
+  从 CMS 拉下来缓存的游戏配置（`src/system/system.ts`），实测 998,567 字符 ——
+  **每个环境都有，生产也有**，ad / fd / wd 三个项目都是这个模式。
+  `check.py` 顶部的 `csv.field_size_limit(sys.maxsize)` 就是为它加的：
+  Python `csv` 默认单字段上限 128KB，没有那一行 `snapshot` 会在
+  「升级前取基线」这一步直接抛异常。
 - **CockroachDB 的 JSONB 会规范化键顺序**：写入 `{"hp":1,"gold":1}`，
   读出 `{"gold": 1, "hp": 1}` ⇒ 「键顺序变化」本方法看不见。
   所幸那不是真的数据变化。

@@ -139,7 +139,8 @@ def test_round_trip_restored_passes():
 def test_snapshot_handles_field_larger_than_csv_default_limit():
     """🔴 csv 默认单字段上限 128KB —— 生产的 storage.value 会超。
 
-    2026-08-31 实测：ad 的 e2e 会写出一条 998KB 的 config 对象，
+    2026-08-31 实测：storage 里有一条 998,567 字符的 `config-<版本>` ——
+    服务端启动时从 CMS 拉下来缓存的游戏配置，**生产环境同样存在**。
     没有这一行 snapshot 直接抛 `field larger than field limit (131072)`。
     大字段在子进程里生成 —— 塞进命令行会 Argument list too long。
     """

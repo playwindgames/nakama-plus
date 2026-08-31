@@ -18,8 +18,11 @@ from dataclasses import dataclass, field
 import yaml
 
 # 🔴 csv 默认单字段上限 128KB —— 生产的 storage.value 会超。
-#    2026-08-31 踩过：e2e 铺完数据后 snapshot 直接抛
+#    2026-08-31 踩过：snapshot 直接抛
 #    `_csv.Error: field larger than field limit (131072)`。
+#    肇事数据是 storage 里 998,567 字符的 `config-<版本>` —— 服务端启动时
+#    从 CMS 拉下来缓存的游戏配置（src/system/system.ts），**每个环境都有，生产也有**，
+#    不是测试脏数据。ad / fd / wd 三个项目都是这个模式。
 csv.field_size_limit(sys.maxsize)
 
 # 表在这一侧不存在。必须与「表存在但是空的」区分开 —— 否则掩盖「表被删了」。
