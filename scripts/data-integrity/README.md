@@ -59,6 +59,31 @@ python3 check.py compare --dsn-cmd "$DSN" \
   是**待证伪的假设**而不是证明 —— 它报「非空」时，结论是
   「发现了未知写入路径」，不是「检查器坏了」。
 - **断言只覆盖 yaml 里写下来的那几条。** 没写下来的不变量，工具不知道它存在。
+- **CockroachDB 的 JSONB 会规范化键顺序**：写入 `{"hp":1,"gold":1}`，
+  读出 `{"gold": 1, "hp": 1}` ⇒ 「键顺序变化」本方法看不见。
+  所幸那不是真的数据变化。
+- **关键字扫描不是 AST 分析**：`scan_project.py` / `scan_framework.py` 的输出是
+  **候选**，不是结论。间接调用（`const f = nk.storageWrite; f(...)`）看不见。
+  ⇒ `nk.* API -> 表` 的映射必须人工确认。
+
+## 阴性对照
+
+```bash
+./selftest.sh "docker exec <db-容器> ./cockroach sql --insecure -d nakama --format=csv"
+```
+
+🔴 **它不通过 ⇒ 本次比对结果作废**，不要读 `compare` 的结论。
+
+它做三件事，缺一不可：
+
+1. 改一行，`compare` 必须报红
+2. **报红时必须点名 `storage`** —— 同库两次快照，`console_user` 必然触发
+   「L-必变 却没变」⇒ 退出码恒为非 0。只看退出码的话，
+   `compare` 完全坏掉自检也会显示绿色（已用两种改坏方式验证过）
+3. 还原后 `storage` 不再有差异 —— 证明那次红只来自注入
+
+跑一次约 80 秒（60 次 `docker exec` 取数）。**被打断会在库里留下注入**，
+下次运行会自动清理并提示。
 
 ## 已实测的发现（3.40，2026-08-31）
 
