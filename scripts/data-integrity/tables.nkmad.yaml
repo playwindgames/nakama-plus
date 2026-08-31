@@ -1,0 +1,58 @@
+# ad 的表分层 —— 扫描给候选，人给答案（spec D10）
+project: nkmad
+generated_from:
+  framework: tables.framework.yaml
+  project_src: ~/GameProjects/nkmad-backend/src
+  scanned_at: "2026-08-31"
+  db_verified_against: nakama@3.40-port-20260827（19 条迁移，20 张表）
+
+layers:
+  # ── L-必变：本次迁移明确要改 ───────────────────────────────
+  must_change:
+    - console_user # ACL 迁移改写 role -> acl
+    - migration_info # sql-migrate 自己记账，每次迁移必写
+
+  # ── L-新建：迁移新建，before 侧不存在 ──────────────────────
+  # 🔴 这三张在 3.29.3 的库里**不存在** —— 取 before 快照时会报「表不存在」。
+  #    见 check.py 的 MISSING 哨兵；不能当成「空表」，那会掩盖「表被删了」。
+  newly_created:
+    - users_notes
+    - console_audit_log
+    - console_acl_template
+
+  # ── L-业务：ad 的 src/ 里有对应 nk.* 调用（依据见行末）─────
+  business:
+    - storage # storageWrite/Read/Delete/List/IndexList
+    - users # accountGetId/accountUpdateId/authenticateDevice
+    - user_device # authenticateDevice、unlinkApple/Facebook/Google
+    - wallet_ledger # walletUpdate/walletLedgerList
+    - purchase # purchaseValidateApple/purchaseValidateGoogle
+    - leaderboard # leaderboardCreate/Delete、tournamentCreate/Delete
+    - leaderboard_record # leaderboardRecordWrite/Delete、tournamentRecordsList
+    - groups # groupCreate/Update/Delete、groupsGetId/groupsGetRandom
+    - group_edge # groupUserJoin/Leave、groupUsersAdd/Kick/Ban/Promote/Demote
+    - notification # notificationSend/notificationsSend/Delete/Get/List
+    - message # channelMessageSend —— 🔴 计划原本归在 framework，实测 ad 直接调了
+
+  # ── L-框架：项目侧无直接调用，但 nakama 自己会写 ───────────
+  framework:
+    - setting # console 改配置时写
+    - user_tombstone # 删号时写
+    - user_edge # 好友关系。ad 的 nk.friend* 为 0，但客户端可直连内建好友 API
+
+  # ── L-恒空：上面都不沾 ─────────────────────────────────────
+  must_be_empty:
+    # 依据：nkmad / nkmfd / nkmwd 三个项目的 src/ 中 nk.*subscription* 调用数均为 0
+    #      （2026-08-31 实测）。
+    # ⚠️ 这是**待证伪的假设**，不是证明：静态扫描只看得见服务端 runtime 调用，
+    #    客户端可以直连 nakama 内建的 /v2/iap/subscription/* 写入这张表。
+    #    检查器报「L-恒空 却有 N 行」时，结论是「发现了未知写入路径」而不是「检查器坏了」。
+    - subscription
+
+# ── D2 第二档：这些列变化只报警告，不报硬门禁 ────────────────
+# 🔴 按**列名**而不是下标（计划原本用下标）。理由：before 在 3.29.3、after 在 3.40，
+#    console_user 被迁移加了 acl 列 —— 同一张表两侧的列序不同，下标会错位。
+soft_columns:
+  # 只有 update_time 属于「被写过」的软信号。
+  # create_time 对既有行不该变，expiry_time 是业务数据 —— 都留在硬门禁里。
+  "*": [update_time]
