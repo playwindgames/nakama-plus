@@ -12,9 +12,15 @@ import csv
 import io
 import json
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 import yaml
+
+# 🔴 csv 默认单字段上限 128KB —— 生产的 storage.value 会超。
+#    2026-08-31 踩过：e2e 铺完数据后 snapshot 直接抛
+#    `_csv.Error: field larger than field limit (131072)`。
+csv.field_size_limit(sys.maxsize)
 
 # 表在这一侧不存在。必须与「表存在但是空的」区分开 —— 否则掩盖「表被删了」。
 MISSING = None

@@ -134,3 +134,16 @@ def test_round_trip_restored_passes():
     r = compare({'console_user': t}, {'console_user': t},
                 {'must_change': ['console_user']}, {}, mode='round_trip')
     assert not r.failures, '往返还原了就该过'
+
+
+def test_snapshot_handles_field_larger_than_csv_default_limit():
+    """🔴 csv 默认单字段上限 128KB —— 生产的 storage.value 会超。
+
+    2026-08-31 实测：ad 的 e2e 会写出一条 998KB 的 config 对象，
+    没有这一行 snapshot 直接抛 `field larger than field limit (131072)`。
+    大字段在子进程里生成 —— 塞进命令行会 Argument list too long。
+    """
+    n = 200_000
+    fake = ['python3', '-c', f'print("k,v"); print("a," + "y" * {n})']
+    got = snapshot(fake, ['t'])
+    assert got['t']['rows'] == [['a', 'y' * n]], '大字段必须能取回来'
