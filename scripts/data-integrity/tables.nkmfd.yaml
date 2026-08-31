@@ -1,0 +1,44 @@
+# nkmfd 的表分层 —— 扫描给候选，人给答案（spec D10）
+#
+# 🔴 本文件**尚未在 nkmfd 的真库上校验过**（2026-08-31）。
+#    must_be_empty 里的每一条都是「服务端 src/ 零调用」推出的**假设**，
+#    而静态扫描看不见客户端直连 nakama 内建 API 的写入。
+#    ⇒ **第一次运行要当成配置校验，不是判决。**
+#      报「L-恒空却非空」时先查是不是这份分层过时了，再查是不是真有未知写入路径。
+project: nkmfd
+generated_from:
+  framework: tables.framework.yaml
+  project_src: ~/GameProjects/nkmfd-backend/src
+  scanned_at: "2026-08-31"
+  db_verified: false
+
+layers:
+  must_change:
+    - console_user
+    - migration_info
+  newly_created:
+    - users_notes
+    - console_audit_log
+    - console_acl_template
+  business:
+    - storage # storageWrite/Read/Delete/List/IndexList
+    - users # accountGetId/accountUpdateId/authenticateDevice
+    - user_device # authenticateDevice、unlinkApple/Facebook/Google
+    - wallet_ledger # walletUpdate（无 walletLedgerList，但写入路径存在）
+    - purchase # purchaseValidateApple/purchaseValidateGoogle
+    - leaderboard # leaderboardCreate/Delete、tournamentCreate/Delete
+    - leaderboard_record # leaderboardRecordWrite/Delete、tournamentRecordsList
+    - notification # notificationSend/notificationsSend
+  framework:
+    - setting # console 改配置时写
+    - user_tombstone # 删号时写
+    - user_edge # 好友关系；fd 的 nk.friend* 为 0，但客户端可直连内建好友 API
+  must_be_empty:
+    # 假设依据：fd 的 src/ 中相关 nk.* 调用数均为 0（2026-08-31 实测）
+    - subscription # nk.*subscription* = 0
+    - groups # nk.group* = 0 —— fd 无公会功能
+    - group_edge # 同上
+    - message # nk.channel* = 0 —— fd 不发频道消息
+
+soft_columns:
+  "*": [update_time]

@@ -1,0 +1,44 @@
+# nkmwd 的表分层 —— 扫描给候选，人给答案（spec D10）
+#
+# 🔴 本文件**尚未在 nkmwd 的真库上校验过**（2026-08-31）。
+#    must_be_empty 里的每一条都是「服务端 src/ 零调用」推出的**假设**，
+#    而静态扫描看不见客户端直连 nakama 内建 API 的写入。
+#    ⇒ **第一次运行要当成配置校验，不是判决。**
+#      报「L-恒空却非空」时先查是不是这份分层过时了，再查是不是真有未知写入路径。
+project: nkmwd
+generated_from:
+  framework: tables.framework.yaml
+  project_src: ~/GameProjects/nkmwd-backend/src
+  scanned_at: "2026-08-31"
+  db_verified: false
+
+layers:
+  must_change:
+    - console_user
+    - migration_info
+  newly_created:
+    - users_notes
+    - console_audit_log
+    - console_acl_template
+  business:
+    - storage # storageWrite/Read/Delete/List/IndexList
+    - users # accountGetId/accountUpdateId/authenticateDevice
+    - user_device # authenticateDevice、unlinkApple/Facebook/Google
+    - purchase # purchaseValidateApple/purchaseValidateGoogle
+    - leaderboard # leaderboardCreate/Delete、tournamentCreate/Delete
+    - leaderboard_record # leaderboardRecordWrite/Delete、tournamentRecordsList
+    - groups # groupCreate/Update/Delete、groupsGetId/groupsGetRandom
+    - group_edge # groupUserJoin/Leave、groupUsersAdd/Kick/Ban/Promote/Demote
+    - notification # notificationSend/notificationsSend/Delete/Get/List
+    - message # channelMessageSend
+  framework:
+    - setting # console 改配置时写
+    - user_tombstone # 删号时写
+    - user_edge # 好友关系；wd 的 nk.friend* 为 0，但客户端可直连内建好友 API
+  must_be_empty:
+    # 假设依据：wd 的 src/ 中相关 nk.* 调用数均为 0（2026-08-31 实测）
+    - subscription # nk.*subscription* = 0
+    - wallet_ledger # nk.wallet* = 0 —— wd 不用钱包
+
+soft_columns:
+  "*": [update_time]

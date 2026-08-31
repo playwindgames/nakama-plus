@@ -25,6 +25,32 @@ python3 check.py compare --dsn-cmd "$DSN" \
 
 退出码 0 = 通过，1 = 有硬门禁失败。
 
+### 完整流程（一次升级演练）
+
+```
+起基线版本 → 铺数据（e2e + seed）→ 🔴 跑阴性对照 → 重取 before 快照
+   → migrate up → 换镜像 → compare（升级方向）
+   → 导出会被 Down 删掉的三张表 → migrate down --limit N → 换回旧镜像
+   → compare --round-trip（回滚方向）
+```
+
+⚠️ **阴性对照会改一行数据 ⇒ 跑完必须重新取 `before.json`。**
+
+⚠️ **`migrate down` 默认 `--limit 1`**，回滚 3 条要显式写 `--limit 3`。
+
+⚠️ **换镜像后先核对版本再往下**（`nakama --version`）——
+`up -d` 不带 `--build` 时 Dockerfile 改了也不会生效，踩过。
+
+### 项目配置的状态
+
+| 文件                | 真库校验过                              |
+| ------------------- | --------------------------------------- |
+| `tables.nkmad.yaml` | ✅ 2026-08-31                           |
+| `tables.nkmfd.yaml` | ❌ **首次运行要当成配置校验，不是判决** |
+| `tables.nkmwd.yaml` | ❌ 同上                                 |
+
+未校验的那两份，`must_be_empty` 全部是「服务端零调用」推出的假设。
+
 ## 每次新升级要改什么
 
 | 文件                     | 改什么                                   |
