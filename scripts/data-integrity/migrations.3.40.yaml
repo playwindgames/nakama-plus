@@ -1,0 +1,35 @@
+# 🔴 断言的来源是**上游意图**，不是迁移 SQL（spec D7）。
+#    从 SQL 反推断言 = 用实现验证实现，bug 会自洽通过。
+nakama_version: 3.40-port-20260827
+base_version: 3.29.3
+
+migrations_changing_data:
+  - id: 20250926112031-console-fine-grained-acl
+    table: console_user
+    intent_source: "上游 PR #2428 —— 4 个粗粒度角色改为 30 个细粒度资源位"
+    declared_columns: [role, acl] # 声称只动这两列
+
+    # ① 守恒律（与实现无关）
+    conservation:
+      row_count: equal
+
+    # ② 映射的双向正确性 —— 🔴 reverse 是要害：
+    #    只查 forward 的话，「把所有人都设成 admin」照样通过。
+    mapping:
+      forward:
+        before: "SELECT id::STRING FROM console_user WHERE role = 1 ORDER BY 1"
+        after: "SELECT id::STRING FROM console_user WHERE (acl->>'admin')::BOOL = true ORDER BY 1"
+        expect: same_set
+      reverse:
+        before: "SELECT id::STRING FROM console_user WHERE role != 1 ORDER BY 1"
+        after: "SELECT id::STRING FROM console_user WHERE acl->>'admin' IS DISTINCT FROM 'true' ORDER BY 1"
+        expect: same_set
+
+    # ③ 无越界修改：声明外的列必须逐行不变
+    #    🔴 console_user 里有 password 和 mfa_secret —— 丢了找不回。
+    untouched_columns_must_match: true
+
+  # 另外两条迁移不改既有数据：
+  #   20251015150737-add-user-notes-audit-acl-templates —— 只建 3 张空表
+  #     ⚠️ 但它的 Down 段会 DROP 这三张表（Task 2 已核实），回滚方向要当心
+  #   20260319134532-add-display-name-index —— 只建索引，不动行
