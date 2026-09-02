@@ -49,7 +49,24 @@ for line in open(src, encoding='utf-8', errors='replace'):
         if s and not s.startswith('//') and not MECH.search(body):
             hunks[key]['real_del'] += 1
 
-kept = [k for k in order if hunks[k]['real_del'] > 0]
+# 🔴 第二道滤器：纯重排。把该 hunk 的全部非机械删除与全部加法各自去空白后拼接，
+#    若两串相等 ⇒ 内容一字未变，只是换行/别名/顺序变了 ⇒ 机械。
+#    覆盖两种实测形态：① gofmt 把函数签名从两行并成一行；② import 去掉别名。
+#    ⚠️ 判据是【拼接后相等】，不是「相似」——差一个字符都不会被滤掉。
+def is_pure_reflow(h):
+    def blob(pred):
+        out = []
+        for b in h['lines']:
+            if pred(b):
+                t = b[1:]
+                if t.strip() and not t.strip().startswith('//') and not MECH.search(b):
+                    out.append(re.sub(r'\s+', '', t))
+        return ''.join(out)
+    d = blob(lambda b: b.startswith('-') and not b.startswith('---'))
+    a = blob(lambda b: b.startswith('+') and not b.startswith('+++'))
+    return bool(d) and d == a
+
+kept = [k for k in order if hunks[k]['real_del'] > 0 and not is_pure_reflow(hunks[k])]
 with open(out, 'w', encoding='utf-8') as fh:
     fh.write(f"# 含非机械删除的 hunk: {len(kept)} 个"
              f"，分布在 {len({k[0] for k in kept})} 个文件\n\n")
