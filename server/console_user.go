@@ -17,10 +17,15 @@ package server
 import (
 	"bytes"
 	"context"
+	// 🔴 必须是 crypto/rand —— 本文件的 ResetUserPassword 用它生成 32 字节
+	// 临时密码（bcrypt 哈希后写入 console_user.password）。
+	// doublemo/main 此处是 math/rand，2026-09-02 的三方套用曾把它带进来；
+	// 逐层定位 L0/L1/L2 为 crypto/rand，L3 起变化，全仓仅此一处。
+	// 见台账 F16。
+	"crypto/rand"
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"net/http"
 	"regexp"
 	"strings"
