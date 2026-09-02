@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -460,7 +461,9 @@ func registerDashboardHandlers(logger *zap.Logger, router *mux.Router) error {
 		return err
 	}
 	_ = indexFile.Close()
-	indexBytes = []byte(indexBytes)
+	indexHTMLStr := string(indexBytes)
+	indexHTMLStr = strings.ReplaceAll(indexHTMLStr, "{{nt}}", strconv.FormatBool(console.UIFS.Nt))
+	indexBytes = []byte(indexHTMLStr)
 
 	indexFn := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Cache-Control", "no-cache")
