@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { startBodyRecording, settle } from '../lib/recorder';
-import { resolveTarget } from '../lib/target';
+import { requireLocalForWrites } from '../lib/target';
 
-const target = resolveTarget(process.env);
+// 🔴 写流程用更严的守卫：无条件本地，没有放行开关（见 lib/target.ts 的说明）
+const target = requireLocalForWrites(process.env);
 const fx = JSON.parse(readFileSync(`${__dirname}/../fixtures.json`, 'utf8'));
 
 // 🔴 UpdateAccount 的风险方向与直觉相反（spec §7 ④）。
@@ -147,33 +148,6 @@ test('DeleteStorageObject：UI 必须走带 version 的 OCC 变体', async ({ pa
     .toMatchSnapshot('delete-storage.json');
 });
 
-// ⏸ 🔴 未完成 —— 2026-09-04 探了 8 轮后停下。交接信息见下，代码保留可直接续。
-//
-// 【卡在哪】点 `write` 控件后，Save 仍然认为表单未变化 ⇒ 零个写请求。
-//   实测排除了两种可能：捕获到的【全部】写请求是空数组 `[]`，
-//   所以不是「路径前缀猜错」也不是「方法不是 PUT」——是那一下点击没改到状态。
-//
-// 【已经查清的】
-//   · 入口：#/settings/users → 点该用户所在行 → 出现 form（含 "Apply Permissions Template"）
-//   · 面板结构：以 Save 为锚往上第 2 层是 fieldset，文本形如
-//     "Edit User - … | Permissions | Apply Permissions Template |
-//      Account read write delete | Account Export read write delete | …"
-//     ⇒ 每个资源一行、行内三个【带文字】的控件（不是 checkbox，也不是 role=switch —— 
-//        我最初查这两个得到零命中，据此误判为「全是无名按钮」，差点降低本条的覆盖面）
-//   · 三点菜单里【没有】ACL 编辑（只有 Reset Password / Enforce MFA / Reset MFA / Delete）
-//   · 🔴 未改动就点 Save ⇒ 零请求。前端判断表单无变化就直接关闭，必须真的改一个权限
-//   · 测试账号由 globalSetup 造好：fx.aclUser = 'e2e-acl-target'，初始 ACL 是
-//     { STORAGE_DATA: { read: true } }，列表页 "Permissions Match" 列显示 Custom
-//
-// 【下一步该试什么】那三个 read/write/delete 很可能不是 <button> 而是包在 <label> 里的
-//   隐藏 input，或是自定义组件。建议先 dump 该行的 outerHTML 看清元素类型，
-//   再决定点 label 还是点 input —— 【不要继续猜着点】。
-//
-// 【为什么值得继续】升级唯一直接改动的写路径（role → acl）。
-//   acl.New() 对不认识的键是【静默 continue】（F10-6 实测）⇒ UI 若送 "storage" 而非
-//   "STORAGE_DATA"，用户【静默失去权限】且调用返回成功。送什么键，只有这条能验。
-//   服务端行为已由 Go 测试 TestConsoleUserAclRoundTrip 覆盖，缺的正是 UI 这一段。
-//
 // 🔴 升级唯一直接改动的写路径（role → acl）。
 //    body 是 map<string, Permissions>，而 acl.New() 对不认识的键是【静默 continue】
 //    （F10-6 实测）⇒ UI 若送 "storage" 而非 "STORAGE_DATA"，用户【静默失去权限】
@@ -185,8 +159,14 @@ test('DeleteStorageObject：UI 必须走带 version 的 OCC 变体', async ({ pa
 //    "Edit User - … | Permissions | Apply Permissions Template |
 //     Account read write delete | Account Export read write delete | …"
 //    ⇒ 每个资源一行、行内三个带文字的控件，所以这条【不需要】靠位置定位。
-test.skip('UpdateUser：ACL 的键必须是 AclResources 枚举名', async ({ page }) => {
+test('UpdateUser：ACL 的键必须是 AclResources 枚举名', async ({ page }) => {
   const stop = startBodyRecording(page, target);
+  // ⚠️ console UI 用 axios（走 XMLHttpRequest）——【不要】在页面里给 window.fetch 打补丁，
+  //    那样抓不到任何请求。用 Playwright 自己的监听。（这个坑让我误判了好几轮）
+  let rawBody: string | undefined;
+  page.on('request', (r) => {
+    if (r.method() === 'PUT' && r.url().includes('/v2/console/user/')) rawBody = r.postData() ?? undefined;
+  });
 
   await page.goto('#/settings/users');
   await settle(page);
@@ -201,10 +181,32 @@ test.skip('UpdateUser：ACL 的键必须是 AclResources 枚举名', async ({ pa
   //    前端判断表单无变化就直接关闭。⇒ 若不改就断言，会得到「零请求」而非「请求内容不对」。
   // 🔵 权限控件是带文字的（面板文本形如 "Account read write delete | Account Export read …"），
   //    所以这里【不需要】靠位置定位 —— 与 ② 的三点按钮不同。
-  const writeToggle = panel.getByText('write', { exact: true }).first();
-  await expect(writeToggle, '面板里找不到 write 控件 —— 权限矩阵结构变了').toBeVisible();
+  // 🔴 权限控件的真实结构（2026-09-04 dump 出来的，不是猜的）：
+  //    <label class="x-toggle cursor-pointer">
+  //      <div>
+  //        <input aria-checked="false" type="checkbox" class="hidden">   ← 【hidden】
+  //        <span>write</span>                                            ← 只是文字
+  //      </div>
+  //    </label>
+  //
+  //  ⚠️ 这解释了我先前三次找不到它的原因，三次都是查找范围的问题：
+  //     · 查 input[type=checkbox] —— 有，但 class="hidden"，被我的「可见」过滤滤掉了
+  //     · 查 [role=switch] —— 没有这个 role
+  //     · 点 getByText('write') —— 点到的是 <span>，不触发 toggle
+  //  ⇒ 必须点 <label>。这里用 label:has(span:text-is("write")) 定位：
+  //    以【文字】为锚（稳），只用 label 这一个标签名（比类名稳）。
+  const writeToggle = panel.locator('label.x-toggle').filter({ hasText: 'write' }).first();
+  await expect(writeToggle, '面板里找不到 write 开关 —— 权限矩阵结构变了').toBeVisible();
   await writeToggle.click();
   await page.waitForTimeout(500);
+
+  // 🔴 必须先在确认框里输 'update'，否则 Save 不提交（提示文字就在输入框旁边：
+  //    "Type 'update' to confirm."）。与 storage 删除的 "Please type 'delete' to confirm"
+  //    是同一个设计 —— console 对危险写操作统一加了这道摩擦。
+  // ⚠️ 这一步我漏了十几轮。教训见台账 F29：查了 required/checkValidity()（浏览器的规则），
+  //    没看输入框【旁边的提示文字】（这个界面的规则）。
+  await panel.locator('input[type=text]').first().fill('update');
+  await page.waitForTimeout(400);
 
   await panel.getByRole('button', { name: 'Save' }).click();
   await settle(page);
@@ -219,6 +221,16 @@ test.skip('UpdateUser：ACL 的键必须是 AclResources 枚举名', async ({ pa
   // 🔴 只断言【顶层字段名】。acl 的键在 body 里嵌一层，startBodyRecording 只记顶层，
   //    所以这里额外把 acl 的键读出来单独断言。
   expect(puts[0].fields, 'UpdateUser 请求体里没有 acl').toContain('acl');
+
+  // 🔴 F10-6 的真实风险：acl.New() 对不认识的资源键是【静默 continue】
+  //    ⇒ UI 若送 "storage" 而非 "STORAGE_DATA"，用户静默失去权限且调用成功。
+  //    startBodyRecording 只记顶层字段名，所以这里单独把 acl 的键读出来验。
+  const aclKeys = Object.keys(JSON.parse(rawBody ?? '{}').acl ?? {});
+  expect(aclKeys.length, 'acl 是空的').toBeGreaterThan(0);
+  for (const k of aclKeys) {
+    expect(k, `🔴 ACL 键 "${k}" 不是 AclResources 枚举名（全大写 + 下划线）`)
+      .toMatch(/^[A-Z][A-Z0-9_]*$/);
+  }
 
   expect(JSON.stringify({ seedHash: fx.seedHash, ...puts[0] }, null, 2))
     .toMatchSnapshot('update-user-acl.json');

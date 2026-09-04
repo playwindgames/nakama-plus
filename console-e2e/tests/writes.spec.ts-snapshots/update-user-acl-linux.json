@@ -1,0 +1,8 @@
+{
+  "seedHash": "8b998399c491",
+  "method": "PUT",
+  "path": "/v2/console/user/e2e-acl-target",
+  "fields": [
+    "acl"
+  ]
+}

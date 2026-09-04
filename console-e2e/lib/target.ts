@@ -39,3 +39,31 @@ export function resolveTarget(
   }
   return url;
 }
+
+/**
+ * 🔴 写流程专用：**无条件要求本地**，`ALLOW_REMOTE_CONSOLE` 对它不生效。
+ *
+ * 为什么比 resolveTarget 更严：本套件的 4 条写流程会【真的改数据】——
+ *   · DeleteStorageObject 真的删掉一个 storage 对象
+ *   · UpdateUser 真的改一个 console 账号的 ACL
+ *   · UpdateAccount / WriteStorageObject 改玩家账号与存档
+ * 而且它们**替你过了 console 自带的确认摩擦**（storage 删除要输 `delete`、
+ * 改 ACL 要输 `update`）—— 那道摩擦本来就是拦人为误操作的。
+ *
+ * 🔴 而 staging 也不是安全的去处（另一条会话线 2026-09-04 实测并记录）：
+ *    staging 宿主上的 CockroachDB 是 `nkmad_dev` / `nkmfd_dev` / `nkmwd_dev`
+ *    与 review **四家共享的同一个实例**。在那上面跑写流程会波及 fd dev 与 wd dev。
+ *
+ * ⇒ 写流程只允许打一次性本地实例。层 1 的路由扫描是纯读，不受此限。
+ */
+export function requireLocalForWrites(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): string {
+  const url = (env.CONSOLE_URL ?? '').trim();
+  if (!url) return 'http://127.0.0.1:7351';
+  throw new Error(
+    `拒绝：写流程只能打本地一次性实例，当前 CONSOLE_URL=${url}。\n` +
+    `它们会真的删数据/改权限，且会绕过 console 的确认摩擦；` +
+    `staging 的库还是 ad/fd/wd/review 四家共享的。此项无放行开关。`,
+  );
+}
