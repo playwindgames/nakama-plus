@@ -1,0 +1,14 @@
+{
+  "seedHash": "8b998399c491",
+  "method": "POST",
+  "path": "/v2/console/account/{id}",
+  "fields": [
+    "avatar_url",
+    "display_name",
+    "lang_tag",
+    "location",
+    "metadata",
+    "timezone",
+    "username"
+  ]
+}

@@ -59,3 +59,30 @@ export async function settle(page: Page): Promise<void> {
   await page.waitForLoadState('networkidle').catch(() => {});
   await page.waitForTimeout(2500);
 }
+
+export type BodyRecord = { method: string; path: string; fields: string[] };
+
+/**
+ * 只记请求体的【字段名】，不记值 —— 值里有 uuid、时间戳、随机串，入快照就是噪声。
+ *
+ * 🔴 这是写流程独有的信息：路由扫描只在页面加载时收网，而写请求只有点了按钮才发。
+ */
+export function startBodyRecording(page: Page, selfOrigin: string): () => BodyRecord[] {
+  const out: BodyRecord[] = [];
+  page.on('request', (r) => {
+    const url = r.url();
+    if (!url.startsWith(selfOrigin)) return;
+    if (!['POST', 'PUT', 'DELETE', 'PATCH'].includes(r.method())) return;
+    const p = normalizePath(url);
+    if (!p.startsWith('/v2/console/')) return;
+    let fields: string[] = [];
+    try {
+      const raw = r.postData();
+      if (raw) fields = Object.keys(JSON.parse(raw)).sort();
+    } catch {
+      fields = ['<非 JSON>'];
+    }
+    out.push({ method: r.method(), path: p, fields });
+  });
+  return () => out;
+}
