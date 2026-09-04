@@ -15,6 +15,14 @@ export type RouteDef = {
   needsFixture?: 'accountId';
   /** 🔴 不测就必须写原因 */
   skip?: string;
+  /**
+   * 🔴 已知问题的【逐条】例外：匹配到的控制台错误不计入层 1。
+   *
+   * ⚠️ 只对本路由生效 —— 绝不把「控制台错误必须为空」这条判据整体放松，
+   *    那会让其余 20 条路由一起失去保护。
+   * ⚠️ 每条都必须写清 reason（含追踪项），与 skip 同规格。
+   */
+  knownConsoleErrors?: Array<{ pattern: RegExp; reason: string }>;
 };
 
 // 🔴 本清单由【实测】产出，不是从 bundle 推断的。
@@ -36,7 +44,15 @@ export const ROUTES: RouteDef[] = [
   { name: 'storage',                  url: '#/storage',                   title: 'Storage | Nakama', mustCall: 'GET /v2/console/storage' },
   { name: 'leaderboards',             url: '#/leaderboards',              title: 'Leaderboards | Nakama' },
   { name: 'matches',                  url: '#/matches',                   title: 'Matches | Nakama', mustCall: 'GET /v2/console/match' },
-  { name: 'chat',                     url: '#/chat',                      title: 'Chat | Nakama' },
+  { name: 'chat', url: '#/chat', title: 'Chat | Nakama',
+    knownConsoleErrors: [
+      { pattern: /status of 400/,
+        reason: '台账 F27：新 UI 加载时以 type=2(ROOM) 查频道但不带 label，服务端必然 400。' +
+                '实测归属为【新 UI 引入】——旧 Angular UI 的 Chat 页零个 API 请求。' +
+                '影响低（功能正常，仅多一条控制台错误），可并入 F20-4 给上游提的 issue。' },
+      { pattern: /^rr$/,
+        reason: '同上 —— 前端把那个 400 吞成了一个没有信息量的 "rr"' },
+    ] },
   { name: 'notifications',            url: '#/notifications',             title: 'Notifications | Nakama' },
   { name: 'groups',                   url: '#/groups',                    title: 'Groups | Nakama' },
   { name: 'api-explorer',             url: '#/api-explorer',              title: 'API Explorer | Nakama' },
