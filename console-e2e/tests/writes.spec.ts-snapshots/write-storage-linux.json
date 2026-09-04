@@ -1,0 +1,10 @@
+{
+  "seedHash": "8b998399c491",
+  "method": "PUT",
+  "path": "/v2/console/storage/seedtest/big-r0w0/{id}",
+  "fields": [
+    "permission_read",
+    "permission_write",
+    "value"
+  ]
+}
