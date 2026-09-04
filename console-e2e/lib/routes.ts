@@ -3,6 +3,14 @@ export type RouteDef = {
   url: string;
   /** 🔴 该路由的预期页面标题 —— 层 1 的核心判据，见文件头说明 */
   title?: string;
+  /**
+   * 🔴 该路由【必须】发出的 console 端点（归一化后，如 GET /v2/console/account/{id}/wallet）。
+   *
+   * 为什么需要它：玩家详情类路由的标题【七条完全相同】
+   * （都是 "{id} - Players | Nakama"，2026-09-04 实测）⇒ 标题判据对它们形同虚设，
+   * 把 wallet 写成 wallett 也照样"通过"。端点是它们唯一可区分的指纹。
+   */
+  mustCall?: string;
   /** 需要 seed 出的实体 id 才能拼出完整 URL */
   needsFixture?: 'accountId';
   /** 🔴 不测就必须写原因 */
@@ -24,10 +32,10 @@ export type RouteDef = {
 export const ROUTES: RouteDef[] = [
   // ── 2026-09-04 逐个实测确认，标题各不相同 ──────────────────
   { name: 'dashboard',                url: '#/',                          title: 'Dashboard | Nakama' },
-  { name: 'players',                  url: '#/players',                   title: 'Players | Nakama' },
-  { name: 'storage',                  url: '#/storage',                   title: 'Storage | Nakama' },
+  { name: 'players',                  url: '#/players',                   title: 'Players | Nakama', mustCall: 'GET /v2/console/account' },
+  { name: 'storage',                  url: '#/storage',                   title: 'Storage | Nakama', mustCall: 'GET /v2/console/storage' },
   { name: 'leaderboards',             url: '#/leaderboards',              title: 'Leaderboards | Nakama' },
-  { name: 'matches',                  url: '#/matches',                   title: 'Matches | Nakama' },
+  { name: 'matches',                  url: '#/matches',                   title: 'Matches | Nakama', mustCall: 'GET /v2/console/match' },
   { name: 'chat',                     url: '#/chat',                      title: 'Chat | Nakama' },
   { name: 'notifications',            url: '#/notifications',             title: 'Notifications | Nakama' },
   { name: 'groups',                   url: '#/groups',                    title: 'Groups | Nakama' },
@@ -35,7 +43,7 @@ export const ROUTES: RouteDef[] = [
   { name: 'runtime',                  url: '#/runtime',                   title: 'Runtime | Nakama' },
   { name: 'settings-users',           url: '#/settings/users',            title: 'Settings - Users | Nakama' },
   { name: 'settings-general',         url: '#/settings/general',          title: 'Settings - General | Nakama' },
-  { name: 'settings-configuration',   url: '#/settings/config',           title: 'Settings - Configuration | Nakama' },
+  { name: 'settings-configuration',   url: '#/settings/config',           title: 'Settings - Configuration | Nakama', mustCall: 'GET /v2/console/config' },
   { name: 'settings-audit-log',       url: '#/settings/audit-log',        title: 'Settings - Audit Log | Nakama' },
 
   // ── 实测不可达 / 有意排除 ────────────────────────────────
@@ -43,9 +51,9 @@ export const ROUTES: RouteDef[] = [
     skip: '页面可达（title="Settings - Data Management"），但含 DeleteAllData —— 不在自动化里碰（spec §14）' },
 
   { name: 'purchases', url: '#/purchases',
-    skip: '🔴 实测不可达：访问后【重定向回 /#/】且标题为 Dashboard。疑似需父级参数，待有账号后在 Task 3 复测' },
+    skip: '🔴 实测不可达：访问后【重定向回 /#/】且标题为 Dashboard。2026-09-04 有账号后复测仍如此 ⇒ 确认不可达（该路由名在 bundle 里 path 为空，是父级路由）' },
   { name: 'subscriptions', url: '#/subscriptions',
-    skip: '🔴 实测不可达：URL 留在 /#/subscriptions 但标题为 Dashboard（= 落到了 404 组件）。同上待复测' },
+    skip: '🔴 实测不可达：URL 留在 /#/subscriptions 但标题为 Dashboard（= 落到了 404 组件）。2026-09-04 有账号后复测仍如此 ⇒ 确认落到 404 组件' },
 
   { name: 'player-hiro',              url: '', skip: 'Hiro 是 Heroic Labs 商业模块，我方未采购 —— 服务端无此端点（F25 查证）' },
   { name: 'player-hiro-inventory',    url: '', skip: '同上' },
@@ -54,7 +62,21 @@ export const ROUTES: RouteDef[] = [
   { name: 'player-satori-messages',   url: '', skip: '同上' },
   { name: 'leaderboard-details',      url: '', skip: '🔴 console 无建榜端点，榜由 runtime 建；本实例不加载游戏模块 ⇒ 无榜可点' },
 
-  // ⚠️ 玩家详情类路由（player-profile / player-friends / player-wallet 等）需要
-  //    一个真实 accountId 才能拼 URL，而探测时实例是空的。
-  //    ⇒ Task 3 加上 seed 之后再实测补入，同样以「标题不同」为凭据。
+  // ── 玩家详情（2026-09-04 有 seed 账号后实测补入）────────────────
+  // 🔴 这七条的【标题完全相同】，靠 mustCall 区分。friends / wallet 的端点是实测得到的，
+  //    其余五条由首轮快照确认后填入（见 tests/routes.spec.ts 的说明）。
+  { name: 'player-profile',       url: '#/players/{accountId}',               needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}' },
+  { name: 'player-friends',       url: '#/players/{accountId}/friends',       needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}/friend' },
+  { name: 'player-wallet',        url: '#/players/{accountId}/wallet',        needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}/wallet' },
+  { name: 'player-groups',        url: '#/players/{accountId}/groups',        needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama' },
+  { name: 'player-payments',      url: '#/players/{accountId}/payments',      needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama' },
+  { name: 'player-storage',       url: '#/players/{accountId}/storage',       needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama' },
+  { name: 'player-notifications', url: '#/players/{accountId}/notifications', needsFixture: 'accountId',
+    title: '{accountId} - Players | Nakama' },
 ];

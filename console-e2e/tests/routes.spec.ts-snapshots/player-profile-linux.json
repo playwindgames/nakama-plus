@@ -1,0 +1,10 @@
+{
+  "seedHash": "8b998399c491",
+  "endpoints": [
+    "GET /v2/console/account/{id}",
+    "GET /v2/console/account/{id}/note",
+    "GET /v2/console/extensions",
+    "GET /v2/console/setting"
+  ],
+  "externalOrigins": []
+}
