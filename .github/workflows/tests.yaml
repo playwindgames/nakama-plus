@@ -1,6 +1,11 @@
 # every push to a branch: run tests
 name: Run tests
 on:
+  # 🔴 push 不可省：我方在本仓【直推分支、不开 PR】（台账 F20-3）
+  #    ⇒ 只配 pull_request 的话 CI 实际从不运行，此前的状况正是如此。
+  #    本文件第一行的注释「every push to a branch」才是原本的意图。
+  # ⚠️ 推 tag 也算 push 事件（台账 F21-2 实测），会额外跑一次，可接受。
+  push:
   pull_request:
     types: [opened, synchronize]
 jobs:
