@@ -13,10 +13,7 @@ import (
 func BenchmarkEtcdStore_Set(b *testing.B) {
 	ctx := context.Background()
 
-	etcdClient, err := testGetEtcdClicent()
-	if err != nil {
-		b.Fatal(err)
-	}
+	etcdClient := testGetEtcdClicent(b)
 
 	p := NewEtcd(etcdClient, "test")
 	defer p.Close()
@@ -35,10 +32,7 @@ func BenchmarkEtcdStore_Set(b *testing.B) {
 
 func BenchmarkEtcdStore_Get(b *testing.B) {
 	ctx := context.Background()
-	etcdClient, err := testGetEtcdClicent()
-	if err != nil {
-		b.Fatal(err)
-	}
+	etcdClient := testGetEtcdClicent(b)
 
 	p := NewEtcd(etcdClient, "test")
 	defer p.Close()
