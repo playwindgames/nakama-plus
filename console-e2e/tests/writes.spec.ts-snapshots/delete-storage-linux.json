@@ -1,0 +1,6 @@
+{
+  "seedHash": "8b998399c491",
+  "method": "DELETE",
+  "path": "/v2/console/storage/seedtest/big-r0w0/{id}/{version}",
+  "fields": []
+}

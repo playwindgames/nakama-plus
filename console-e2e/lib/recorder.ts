@@ -20,8 +20,18 @@ const POLLED = ['/v2/console/status'];
 
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 
+// 🔴 storage 的 version 是 32 位十六进制，且【每次实例都不同】——
+//    2026-09-04 实测两轮：8807e8d418f4ad13f6a3a825d6e5e66e → 2c690d6c8570e9366ba5da78f374bb7e
+//    内容完全一样（同一份 seed），说明它不是纯内容哈希、含随机量。
+//    ⚠️ spec §5 的归一化清单列了 UUID / 时间戳 / 请求体的值 / 轮询，【漏了版本号】。
+// 🔵 归一化不影响 OCC 判据：那条靠【路径段数】区分 4 段/5 段变体，
+//    把 version 换成 {version} 仍然是 7 段。
+const VERSION = /\/[0-9a-f]{32}(?=\/|$)/gi;
+
 export function normalizePath(url: string): string {
-  return new URL(url).pathname.replace(UUID, '{id}');   // 查询串整体丢弃
+  return new URL(url).pathname               // 查询串整体丢弃
+    .replace(UUID, '{id}')
+    .replace(VERSION, '/{version}');
 }
 
 export function startRecording(page: Page, selfOrigin: string): () => Recording {
