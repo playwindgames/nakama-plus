@@ -63,8 +63,10 @@ export const ROUTES: RouteDef[] = [
   { name: 'leaderboard-details',      url: '', skip: '🔴 console 无建榜端点，榜由 runtime 建；本实例不加载游戏模块 ⇒ 无榜可点' },
 
   // ── 玩家详情（2026-09-04 有 seed 账号后实测补入）────────────────
-  // 🔴 这七条的【标题完全相同】，靠 mustCall 区分。friends / wallet 的端点是实测得到的，
-  //    其余五条由首轮快照确认后填入（见 tests/routes.spec.ts 的说明）。
+  // 🔴 这七条的【标题完全相同】（都是 "{id} - Players | Nakama"），靠 mustCall 区分。
+  //    七条的端点均由 2026-09-04 首轮快照实测确认，不是推断。
+  // ⚠️ dashboard 与 settings-general 的端点集合完全相同（只有 app-init 的
+  //    extensions|setting），它们靠标题区分 —— 标题不同，故仍可分辨。
   { name: 'player-profile',       url: '#/players/{accountId}',               needsFixture: 'accountId',
     title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}' },
   { name: 'player-friends',       url: '#/players/{accountId}/friends',       needsFixture: 'accountId',
@@ -72,11 +74,11 @@ export const ROUTES: RouteDef[] = [
   { name: 'player-wallet',        url: '#/players/{accountId}/wallet',        needsFixture: 'accountId',
     title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}/wallet' },
   { name: 'player-groups',        url: '#/players/{accountId}/groups',        needsFixture: 'accountId',
-    title: '{accountId} - Players | Nakama' },
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/account/{id}/group' },
   { name: 'player-payments',      url: '#/players/{accountId}/payments',      needsFixture: 'accountId',
-    title: '{accountId} - Players | Nakama' },
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/purchase' },
   { name: 'player-storage',       url: '#/players/{accountId}/storage',       needsFixture: 'accountId',
-    title: '{accountId} - Players | Nakama' },
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/storage' },
   { name: 'player-notifications', url: '#/players/{accountId}/notifications', needsFixture: 'accountId',
-    title: '{accountId} - Players | Nakama' },
+    title: '{accountId} - Players | Nakama', mustCall: 'GET /v2/console/notification' },
 ];
