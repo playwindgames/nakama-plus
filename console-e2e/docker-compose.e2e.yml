@@ -1,0 +1,39 @@
+# 一次性实例：跑完即销毁。每次跑都是同一初始状态，这是快照能稳定的前提。
+#
+# ⚠️ 端口写死 7350/7351：scripts/data-integrity/seed/seed.py 里
+#    API 与 CONSOLE_PORT 是硬编码的。改端口就要同时改它。
+services:
+  db:
+    image: postgres:16.8-alpine
+    environment:
+      - POSTGRES_DB=nakama
+      - POSTGRES_PASSWORD=localdb
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "nakama"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  nakama:
+    build:
+      context: ..
+      dockerfile: ./build/Dockerfile
+    image: nakama-console-e2e
+    entrypoint:
+      - "/bin/sh"
+      - "-ecx"
+      - >
+        /nakama/nakama migrate up --database.address postgres:localdb@db:5432/nakama &&
+        exec /nakama/nakama --database.address postgres:localdb@db:5432/nakama
+        --logger.level WARN --socket.port 7350 --console.port 7351
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:7350:7350"
+      - "127.0.0.1:7351:7351"
+    healthcheck:
+      test: ["CMD", "/nakama/nakama", "healthcheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
