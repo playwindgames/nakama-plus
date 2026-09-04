@@ -82,9 +82,31 @@ export default async function globalSetup(_config: FullConfig) {
     .digest('hex')
     .slice(0, 12);
 
+  // 🔴 专供 ACL 写流程的测试账号 —— 绝不能改 admin 自己，改错会把自己锁在外面。
+  // ⚠️ 不设 newsletter_subscription：为 true 时 AddUser 会 POST 到
+  //    cloud.heroiclabs.com（F10-6 查证）。
+  // 🔵 键必须是 console.AclResources 的枚举名（STORAGE_DATA 而非 storage）——
+  //    acl.New() 对不认识的键是静默 continue（F10-6 实测）。
+  const aclUser = 'e2e-acl-target';
+  const mk = await api.request.post(`${target}/v2/console/user`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      username: aclUser,
+      email: `${aclUser}@example.invalid`,
+      acl: { STORAGE_DATA: { read: true, write: false, delete: false } },
+    },
+  });
+  if (!mk.ok()) {
+    const t = await mk.text();
+    // 已存在不算错（实例是一次性的，正常不会撞；但重跑时留着栈会）
+    if (!t.includes('exists')) {
+      throw new Error(`建 ACL 测试账号失败 ${mk.status()}：${t.slice(0, 300)}`);
+    }
+  }
+
   writeFileSync(`${__dirname}/fixtures.json`,
-    JSON.stringify({ accountId, seedHash }, null, 2));
-  console.log(`[setup] accountId=${accountId}  seedHash=${seedHash}`);
+    JSON.stringify({ accountId, seedHash, aclUser }, null, 2));
+  console.log(`[setup] accountId=${accountId}  seedHash=${seedHash}  aclUser=${aclUser}`);
 
   await browser.close();
 }
