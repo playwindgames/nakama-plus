@@ -6,9 +6,19 @@ export type Recording = {
   consoleErrors: string[];
 };
 
-// 🔴 允许的外部来源 = 现状。2026-09-03 实测：登录页会向 heroiclabs.com 发 14 个请求
-//    （1 个 heroic-news-recent-rss.xml + 13 张图）。
-//    CSP 落地后把这里收紧成空数组，这条判据就变成 CSP 的验收（spec §12 判据 7）。
+// 🔴 允许的外部来源：**空**，且应当一直保持空。
+//
+// 2026-09-07 CSP 落地后（`server/console.go` 的 `indexFn` 设 `connect-src 'self'`），
+// console 不该再向任何外部来源发请求。⇒ 这条判据现在是 **CSP 的常驻守卫**：
+// 哪天 CSP 被移除或被绕过，或上游新塞了一个外部资源，login 那条用例立刻红。
+//
+// ⚠️ **不要往这里加条目来"修复"一次失败** —— 那等于把 CSP 的保护关掉。
+//    真加了新外部依赖，先问它该不该存在；确实需要，就同时改 CSP 策略串并说明理由。
+//
+// 🔵 历史：CSP 之前这里是 `['https://heroiclabs.com']`，因为登录页会实时拉它的
+//    RSS（2026-09-03 实测：仅打开登录页就发 14 个请求 = 1 个 RSS + 13 张图）。
+//    判据 7 的走通方式是先证明能红（无 CSP + 空白名单 ⇒ 报 heroiclabs 越界）
+//    再证明能绿（有 CSP ⇒ 22 passed）。
 export const ALLOWED_EXTERNAL: string[] = [];
 
 // 🔴 全应用轮询的端点，必须排除，否则快照每次都不一样。
