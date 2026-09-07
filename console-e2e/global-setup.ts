@@ -1,7 +1,7 @@
 import { chromium, type FullConfig } from '@playwright/test';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolveTarget } from './lib/target';
 
 const COMPOSE = 'docker compose -f docker-compose.e2e.yml';
@@ -23,13 +23,35 @@ export default async function globalSetup(_config: FullConfig) {
 
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  await page.goto(`${target}/`);
-  await page.getByRole('textbox', { name: 'Username' })
-    .fill(process.env.CONSOLE_USER ?? 'admin');
-  await page.getByRole('textbox', { name: 'Password' })
-    .fill(process.env.CONSOLE_PASS ?? 'password');
-  await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.waitForURL(/#\/$/, { timeout: 20_000 });
+
+  // 🔴 globalSetup 里出错，Playwright 一条测试都没跑 ⇒ 既没有 report 也没有 test-results
+  //    ⇒ CI 上传的产物是【空的】。2026-09-07 首次 CI 运行就是这样失败的：只有一行
+  //    "waitForURL 超时"，查不下去。所以这里的失败必须自己把证据留在盘上。
+  const consoleErrors: string[] = [];
+  const authResponses: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
+  page.on('pageerror', (e) => consoleErrors.push(`PAGEERROR ${String(e)}`));
+  page.on('requestfailed', (r) =>
+    authResponses.push(`FAILED ${r.method()} ${r.url()} —— ${r.failure()?.errorText}`));
+  page.on('response', async (r) => {
+    if (!r.url().includes('/v2/console/')) return;
+    let body = '';
+    try { body = (await r.text()).slice(0, 300); } catch { body = '<读不到>'; }
+    authResponses.push(`${r.status()} ${r.request().method()} ${r.url()} —— ${body}`);
+  });
+
+  try {
+    await page.goto(`${target}/`);
+    await page.getByRole('textbox', { name: 'Username' })
+      .fill(process.env.CONSOLE_USER ?? 'admin');
+    await page.getByRole('textbox', { name: 'Password' })
+      .fill(process.env.CONSOLE_PASS ?? 'password');
+    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.waitForURL(/#\/$/, { timeout: 20_000 });
+  } catch (err) {
+    await dumpLoginFailure(page, err, consoleErrors, authResponses, isLocal);
+    throw err;
+  }
   await page.context().storageState({ path: `${__dirname}/.auth.json` });
 
   // 详情路由要拼 id。🔵 从 console API 查，而不是解析 seed 的输出 ——
@@ -109,4 +131,48 @@ export default async function globalSetup(_config: FullConfig) {
   console.log(`[setup] accountId=${accountId}  seedHash=${seedHash}  aclUser=${aclUser}`);
 
   await browser.close();
+}
+
+/** 登录失败时把现场落盘到 test-results/ —— CI 的 upload-artifact 正好覆盖这个目录。 */
+async function dumpLoginFailure(
+  page: import('@playwright/test').Page,
+  err: unknown,
+  consoleErrors: string[],
+  responses: string[],
+  isLocal: boolean,
+) {
+  const dir = `${__dirname}/test-results`;
+  mkdirSync(dir, { recursive: true });
+
+  let serverLog = '（远端实例，不取日志）';
+  if (isLocal) {
+    try {
+      serverLog = execSync(`${COMPOSE} logs --no-color --tail 200 nakama`,
+        { cwd: __dirname, encoding: 'utf8' });
+    } catch (e) { serverLog = `取日志失败: ${String(e)}`; }
+  }
+
+  const report = [
+    `# globalSetup 登录失败`,
+    ``,
+    `错误: ${String(err).split('\n')[0]}`,
+    `URL:  ${page.url()}`,
+    `标题: ${await page.title().catch(() => '<取不到>')}`,
+    ``,
+    `## console API 响应 (${responses.length})`,
+    ...(responses.length ? responses : ['（一条都没有 —— 请求根本没发出去）']),
+    ``,
+    `## 浏览器控制台错误 (${consoleErrors.length})`,
+    ...(consoleErrors.length ? consoleErrors : ['（无）']),
+    ``,
+    `## nakama 服务端日志`,
+    serverLog,
+  ].join('\n');
+
+  writeFileSync(`${dir}/login-failure.md`, report);
+  await page.screenshot({ path: `${dir}/login-failure.png`, fullPage: true }).catch(() => {});
+  await page.content()
+    .then((html) => writeFileSync(`${dir}/login-failure.html`, html))
+    .catch(() => {});
+  console.error(`\n${report}\n`);   // 🔵 也打到 CI 日志：产物上传若也失败，日志里还有一份
 }
