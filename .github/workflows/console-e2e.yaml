@@ -1,0 +1,69 @@
+# console UI 的行为基线（台账 F10 第 4 层 / spec 2026-09-04-console-e2e-design）
+#
+# 与 tests.yaml 分开的理由：触发条件、耗时、失败含义都不同。
+#   tests.yaml       —— Go 测试，每次 push 都跑，秒级到分钟级
+#   console-e2e      —— 要构建镜像 + 起栈 + 跑浏览器，只在 console 相关变更时跑
+name: Console E2E
+
+on:
+  # 🔴 只在 console 相关变更时跑，【不设 schedule】。
+  #    定时跑的问题是没人看——一个每周红一次而无人处理的门禁，会训练人忽略它。
+  #    而这套东西的价值只在「改了 console」时兑现：
+  #      · 我方改 server/console*.go（整个 3.40 升级里 3 次：F8 / F16 / CSP）
+  #      · 上游升基底带来新的 console/ui/dist（我方基底升级 ≈ 一年一次量级）
+  #    ⚠️ 代价要写明：触发稀疏 ⇒ 套件可能在两次运行之间腐烂
+  #       （Playwright / 浏览器 / Node / compose 行为都会漂）。
+  #       ⇒ 真到升级那次若首跑失败，先判断是套件腐烂还是产品回归，别直接当回归。
+  push:
+    paths:
+      - 'console/**'                       # 含内嵌的 ui/dist —— 升上游版本必然命中
+      - 'server/console*.go'
+      - 'console-e2e/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/console-e2e.yaml'
+  workflow_dispatch:
+
+jobs:
+  console_e2e:
+    name: Console UI 行为基线
+    runs-on: ubuntu-latest
+    timeout-minutes: 30                     # 本地实测 ~3.7 分钟，留足余量
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: console-e2e/package-lock.json
+
+      - name: Install deps
+        working-directory: console-e2e
+        run: npm ci
+
+      # ⚠️ 浏览器二进制几百 MB，不缓存的话每次多几分钟（spec §13 风险 2）
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('console-e2e/package-lock.json') }}
+
+      - name: Install chromium
+        working-directory: console-e2e
+        run: npx playwright install --with-deps chromium
+
+      # globalSetup 会自己 docker compose up --build（从本仓构建 nakama）+ 跑 seed
+      - name: Run
+        working-directory: console-e2e
+        run: npx playwright test
+
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            console-e2e/playwright-report/
+            console-e2e/test-results/
+          retention-days: 7
