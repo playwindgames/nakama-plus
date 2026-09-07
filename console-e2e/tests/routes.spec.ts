@@ -59,3 +59,53 @@ for (const route of ROUTES) {
     }, null, 2)).toMatchSnapshot(`${route.name}.json`);
   });
 }
+
+// 🔴 登录页必须单独测，而且要【清掉登录态】——否则会被直接重定向到 Dashboard。
+//
+// 为什么它不在 ROUTES 里：ROUTES 的每条都复用 globalSetup 存下的 storageState（已登录），
+// 而登录页只有未登录时才可达。
+//
+// ⚠️ 这是本套件曾经的一个【结构性空洞】：那 14 个 heroiclabs 请求（1 个 RSS + 13 张图）
+//    只在登录页发，而登录是在 globalSetup 里做的、那里没有 recorder
+//    ⇒ 白名单判据在其余 21 条路由上【永远不会红】，守的东西根本没被访问。
+//    2026-09-07 做 CSP 验收时发现：把白名单收紧成 [] 跑全量，21 条竟然全绿。
+// 🔵 而 09-04 我"验证"这条阴性对照时用的是 `-g login`，那个过滤匹配不到任何 test，
+//    Playwright 报 "No tests found"，我把它当成通过了。⇒ 绿灯不是证据，能红才是。
+test.describe('login', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });   // 🔴 不带登录态
+
+  test('login', async ({ page }) => {
+    const stop = startRecording(page, target);
+    await page.goto('#/login');
+    await settle(page);
+    const rec = stop();
+
+    expect(await page.title(), '登录页标题不对 —— 多半被重定向了').toBe('Nakama');
+
+    // 🔴 CSP 拦截 heroiclabs RSS 时，浏览器必然在控制台留下违规提示 ——
+    //    这是 CSP【生效】的表现，不是缺陷。逐条登记，不放松判据本身。
+    //    2026-09-07 实测三条，全部同源于一次被拒的请求，无其他错误混入：
+    //      [0] Connecting to 'https://heroiclabs.com/heroic-news-recent-rss.xml' violates
+    //          the following Content Security Policy directive: "connect-src 'self'".
+    //      [1] Fetch API cannot load … Refused to connect …
+    //      [2] TypeError: Failed to fetch      ← 组件对上面那次拒绝的反应
+    //    ⚠️ 登记前逐条读过全文，没有「大概是 CSP 提示」就写例外 ——
+    //       一个写得太宽的例外，和一个空转的断言效果一样。
+    const CSP_EXPECTED = [
+      /Content Security Policy/,
+      /Refused to connect/,
+      /TypeError: Failed to fetch/,
+    ];
+    const unexpected = rec.consoleErrors.filter((e) => !CSP_EXPECTED.some((p) => p.test(e)));
+    expect(unexpected, 'login 有【CSP 拦截之外的】控制台错误').toEqual([]);
+
+    const outOfBounds = rec.externalOrigins.filter((o) => !ALLOWED_EXTERNAL.includes(o));
+    expect(outOfBounds, 'login 发出了白名单之外的外部请求').toEqual([]);
+
+    expect(JSON.stringify({
+      seedHash: fx.seedHash,
+      endpoints: rec.endpoints,
+      externalOrigins: rec.externalOrigins,
+    }, null, 2)).toMatchSnapshot('login.json');
+  });
+});

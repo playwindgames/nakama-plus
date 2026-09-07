@@ -9,7 +9,7 @@ export type Recording = {
 // 🔴 允许的外部来源 = 现状。2026-09-03 实测：登录页会向 heroiclabs.com 发 14 个请求
 //    （1 个 heroic-news-recent-rss.xml + 13 张图）。
 //    CSP 落地后把这里收紧成空数组，这条判据就变成 CSP 的验收（spec §12 判据 7）。
-export const ALLOWED_EXTERNAL: string[] = ['https://heroiclabs.com'];
+export const ALLOWED_EXTERNAL: string[] = [];
 
 // 🔴 全应用轮询的端点，必须排除，否则快照每次都不一样。
 //    2026-09-04 实测：/v2/console/status 在 #/players、#/storage、#/settings/config 里

@@ -468,6 +468,38 @@ func registerDashboardHandlers(logger *zap.Logger, router *mux.Router) error {
 	indexFn := func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Cache-Control", "no-cache")
 		w.Header().Set("X-Frame-Options", "deny")
+		// 🔴 CSP —— 台账 F25：console 的登录页会【实时拉取】heroiclabs 的 RSS
+		//    （https://heroiclabs.com/heroic-news-recent-rss.xml），2026-09-03 实测
+		//    仅打开登录页就向 heroiclabs.com 发 14 个请求（1 个 RSS + 13 张图）。
+		//
+		//    ⚠️ 风险不是「上游展示推广」——旧 Angular UI 的登录页同样有推广横幅。
+		//    变的是【内容怎么来】：旧版是静态横幅、编译进 bundle、只在我方换版本时才变、
+		//    且能预先在 bundle 里看到；新版是运行期拉取 ⇒ 上游随时可改，
+		//    我方不发版也会变，事先看不到。UI 是闭源预编译产物，我方改不了它的内容。
+		//
+		// 🔵 connect-src 'self' 从源头拦掉这类请求，且【一次性覆盖上游未来塞进来的任何
+		//    外部资源】——不依赖上游给不给开关（遥测有 {{nt}} 开关，新闻栏没有）。
+		//
+		// ⚠️ 已知代价（2026-09-03 + 09-07 实测）：
+		//    · img-src 'self' 会拦掉 gravatar 头像 ⇒ 头像变空，属外观问题
+		//    · 'unsafe-inline' / 'unsafe-eval' 不可省：console UI 用 Vue 运行时编译，
+		//      去掉会整个白屏（实测）
+		//    · MFA 二维码、文档/论坛等是 <a href> 导航，CSP 不拦
+		//    · monaco 编辑器要 worker-src blob:
+		//
+		// 🔵 验收由 console-e2e 承担：把 lib/recorder.ts 的 ALLOWED_EXTERNAL 收紧成 []，
+		//    未加此头时路由扫描必红、加了必绿（spec 2026-09-04-console-e2e-design §12 判据 7）。
+		w.Header().Set("Content-Security-Policy", strings.Join([]string{
+			"default-src 'self'",
+			"script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+			"style-src 'self' 'unsafe-inline'",
+			"img-src 'self' data: blob:",
+			"font-src 'self' data:",
+			"connect-src 'self'",
+			"worker-src 'self' blob:",
+			"frame-src 'none'",
+			"object-src 'none'",
+		}, "; "))
 		_, _ = w.Write(indexBytes)
 	}
 
